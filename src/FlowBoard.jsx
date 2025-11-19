@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit2, Calendar, Zap, BarChart3, CheckCircle2, Circle, ChevronDown, ChevronUp, Download, Upload, GitBranch, Sun, Moon, Search, X, AlertTriangle, Bell } from 'lucide-react';
+import { Plus, Trash2, Edit2, Calendar, Zap, BarChart3, CheckCircle2, Circle, ChevronDown, ChevronUp, Download, Upload, GitBranch, Sun, Moon, Search, X, AlertTriangle, Bell, Filter } from 'lucide-react';
 
 // IndexedDB Manager
 const DB_NAME = 'FlowBoardDB';
@@ -220,6 +220,8 @@ export default function FlowBoard() {
   const [showFlowEditor, setShowFlowEditor] = useState(false);
   const [editingFlowTask, setEditingFlowTask] = useState(null);
   const [taskToDelete, setTaskToDelete] = useState(null);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
   
   // Filtros
   const [searchText, setSearchText] = useState('');
@@ -459,7 +461,8 @@ export default function FlowBoard() {
               <h1 className={`text-2xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent`}>
                 ⚡ FlowBoard
               </h1>
-              <div className="flex gap-2">
+              {/* Menu Desktop */}
+              <div className="hidden min-[1293px]:flex gap-2">
                 <button
                   onClick={() => setView('kanban')}
                   className={`px-4 py-2 rounded-lg transition ${view === 'kanban' ? (darkMode ? 'bg-purple-600' : 'bg-purple-500') : (darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/30 hover:bg-white/40')}`}
@@ -479,6 +482,50 @@ export default function FlowBoard() {
                 >
                   Programador
                 </button>
+              </div>
+              
+              {/* Menu Mobile */}
+              <div className="min-[1293px]:hidden relative">
+                <button
+                  onClick={() => setShowMobileMenu(!showMobileMenu)}
+                  className={`px-4 py-2 rounded-lg transition ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/30 hover:bg-white/40'}`}
+                  title="Menu"
+                >
+                  ☰ Menu
+                </button>
+                
+                {/* Menu Dropdown Mobile */}
+                {showMobileMenu && (
+                  <div className={`absolute top-full left-0 mt-2 ${darkMode ? 'bg-slate-800 border-white/20' : 'bg-white border-slate-200'} border rounded-lg shadow-2xl z-50 min-w-[200px]`}>
+                    <button
+                      onClick={() => {
+                        setView('kanban');
+                        setShowMobileMenu(false);
+                      }}
+                      className={`w-full text-left px-4 py-3 transition border-b ${darkMode ? 'border-white/10 hover:bg-white/10' : 'border-slate-200 hover:bg-slate-100'} ${view === 'kanban' ? (darkMode ? 'bg-purple-600/30' : 'bg-purple-100') : ''}`}
+                    >
+                      📊 Kanban
+                    </button>
+                    <button
+                      onClick={() => {
+                        setView('dashboard');
+                        setShowMobileMenu(false);
+                      }}
+                      className={`w-full text-left px-4 py-3 transition border-b ${darkMode ? 'border-white/10 hover:bg-white/10' : 'border-slate-200 hover:bg-slate-100'} ${view === 'dashboard' ? (darkMode ? 'bg-purple-600/30' : 'bg-purple-100') : ''}`}
+                    >
+                      📈 Dashboard
+                    </button>
+                    <button
+                      onClick={() => {
+                        setView('programmer');
+                        setShowMobileMenu(false);
+                      }}
+                      className={`w-full text-left px-4 py-3 transition ${darkMode ? 'hover:bg-white/10' : 'hover:bg-slate-100'} ${view === 'programmer' ? (darkMode ? 'bg-purple-600/30' : 'bg-purple-100') : ''}`}
+                    >
+                      👨‍💻 Programador
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
             
@@ -514,100 +561,125 @@ export default function FlowBoard() {
             </div>
           </div>
 
-          {/* Filtros */}
-          <div className={`flex flex-wrap gap-2 items-center ${darkMode ? 'bg-white/5' : 'bg-white/20'} p-3 rounded-lg`}>
-            <div className={`flex items-center gap-2 flex-1 ${darkMode ? 'bg-white/10' : 'bg-white/40'} rounded px-3 py-2`}>
-              <Search className="w-4 h-4" />
-              <input
-                type="text"
-                placeholder="Buscar tasks..."
-                value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
-                className={`bg-transparent outline-none flex-1 ${darkMode ? 'text-white placeholder-white/50' : 'text-slate-900 placeholder-slate-600'}`}
-              />
-            </div>
+          {/* Filtros - Responsivo */}
+          <div className={`flex flex-col gap-3 ${darkMode ? 'bg-white/5' : 'bg-white/20'} p-2 md:p-3 rounded-lg`}>
+            {/* Linha 1: Busca + Botões */}
+            <div className={`flex items-center gap-2 w-full flex-wrap md:flex-nowrap`}>
+              {/* Input de Busca */}
+              <div className={`flex items-center gap-2 flex-1 min-w-[200px] ${darkMode ? 'bg-white/10' : 'bg-white/40'} rounded px-2 md:px-3 py-1 md:py-2`}>
+                <Search className="w-3 h-3 md:w-4 md:h-4 flex-shrink-0" />
+                <input
+                  type="text"
+                  placeholder="Buscar..."
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                  className={`bg-transparent outline-none flex-1 text-xs md:text-base ${darkMode ? 'text-white placeholder-white/50' : 'text-slate-900 placeholder-slate-600'}`}
+                />
+              </div>
 
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className={`bg-purple-600 hover:bg-purple-700 text-white border border-purple-700 rounded px-3 py-2 transition`}
-            >
-              <option value="">Todos os Status</option>
-              <option value="backlog">Backlog</option>
-              <option value="progress">Em Progresso</option>
-              <option value="review">Revisão</option>
-              <option value="done">Concluído</option>
-            </select>
-
-            <select
-              value={filterPriority}
-              onChange={(e) => setFilterPriority(e.target.value)}
-              className={`bg-purple-600 hover:bg-purple-700 text-white border border-purple-700 rounded px-3 py-2 transition`}
-            >
-              <option value="">Todas as Prioridades</option>
-              <option value="alta">Alta</option>
-              <option value="média">Média</option>
-              <option value="baixa">Baixa</option>
-            </select>
-
-            <label className={`flex items-center gap-2 px-3 py-2 ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/40 hover:bg-white/50'} rounded cursor-pointer transition`}>
-              <input
-                type="checkbox"
-                checked={filterOverdue}
-                onChange={(e) => setFilterOverdue(e.target.checked)}
-              />
-              <span className="text-sm">Atrasadas</span>
-            </label>
-
-            {hasActiveFilters && (
-              <button
-                onClick={() => {
-                  setSearchText('');
-                  setFilterStatus('');
-                  setFilterPriority('');
-                  setFilterOverdue(false);
-                }}
-                className={`flex items-center gap-1 px-3 py-2 ${darkMode ? 'bg-red-500/20 hover:bg-red-500/30 text-red-400' : 'bg-red-300/40 hover:bg-red-300/60 text-red-700'} rounded transition`}
+              {/* Status Filter - Mobile Hidden */}
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className={`hidden sm:block bg-purple-600 hover:bg-purple-700 text-white border border-purple-700 rounded px-2 md:px-3 py-1 md:py-2 transition text-xs md:text-sm`}
               >
-                <X className="w-4 h-4" />
-                Limpar
-              </button>
-            )}
+                <option value="">Status</option>
+                <option value="backlog">Backlog</option>
+                <option value="progress">Em Progresso</option>
+                <option value="review">Revisão</option>
+                <option value="done">Concluído</option>
+              </select>
 
-            <select
-              value={currentProject}
-              onChange={(e) => setCurrentProject(e.target.value)}
-              className={`bg-purple-600 hover:bg-purple-700 text-white border border-purple-700 rounded px-3 py-2 transition`}
-            >
-              <option value="all">Todos os Projetos</option>
-              {projects.map(p => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
+              {/* Priority Filter - Mobile Hidden */}
+              <select
+                value={filterPriority}
+                onChange={(e) => setFilterPriority(e.target.value)}
+                className={`hidden sm:block bg-purple-600 hover:bg-purple-700 text-white border border-purple-700 rounded px-2 md:px-3 py-1 md:py-2 transition text-xs md:text-sm`}
+              >
+                <option value="">Prioridade</option>
+                <option value="alta">Alta</option>
+                <option value="média">Média</option>
+                <option value="baixa">Baixa</option>
+              </select>
 
-            <div className="flex gap-2 ml-auto">
+              {/* Templates - Mobile Hidden */}
               <button 
                 onClick={() => setShowTemplates(true)}
-                className={`px-4 py-2 rounded-lg transition ${darkMode ? 'bg-purple-600 hover:bg-purple-700' : 'bg-purple-500 hover:bg-purple-600'}`}
+                className={`hidden md:flex px-2 md:px-4 py-1 md:py-2 rounded-lg transition text-xs md:text-sm whitespace-nowrap ${darkMode ? 'bg-purple-600 hover:bg-purple-700' : 'bg-purple-500 hover:bg-purple-600'}`}
               >
-                📋 Templates
+                📋
               </button>
 
-              <button onClick={exportData} className={`p-2 ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/30 hover:bg-white/40'} rounded-lg transition`}>
-                <Download className="w-5 h-5" />
+              {/* Export - Mobile Hidden */}
+              <button 
+                onClick={exportData} 
+                className={`hidden md:block p-1 md:p-2 ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/30 hover:bg-white/40'} rounded-lg transition`}
+              >
+                <Download className="w-3 h-3 md:w-5 md:h-5" />
               </button>
-              
-              <label className={`p-2 ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/30 hover:bg-white/40'} rounded-lg transition cursor-pointer`}>
-                <Upload className="w-5 h-5" />
-                <input type="file" accept=".json" onChange={importData} className="hidden" />
-              </label>
-              
+
+              {/* Nova Task - Sempre visível */}
               <button
                 onClick={() => setShowNewTask(true)}
-                className="bg-gradient-to-r from-purple-600 to-pink-600 px-4 py-2 rounded-lg hover:from-purple-700 hover:to-pink-700 transition flex items-center gap-2"
+                className="bg-gradient-to-r from-purple-600 to-pink-600 px-2 md:px-4 py-1 md:py-2 rounded-lg hover:from-purple-700 hover:to-pink-700 transition flex items-center gap-1 text-xs md:text-base whitespace-nowrap"
               >
-                <Plus className="w-5 h-5" />
-                Nova Task
+                <Plus className="w-3 h-3 md:w-5 md:h-5" />
+                <span className="hidden sm:inline">Nova</span>
+              </button>
+            </div>
+
+            {/* Linha 2: Filtros Adicionais - Mobile Expandível */}
+            <div className={`flex flex-wrap gap-2 items-center md:gap-2 ${showMobileFilters ? 'block' : 'hidden md:flex'}`}>
+              {/* Atrasadas - Mobile sem label */}
+              <label className={`flex items-center gap-1 px-2 md:px-3 py-1 md:py-2 ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/40 hover:bg-white/50'} rounded cursor-pointer transition text-xs md:text-sm`}>
+                <input
+                  type="checkbox"
+                  checked={filterOverdue}
+                  onChange={(e) => setFilterOverdue(e.target.checked)}
+                />
+                <span className="hidden sm:inline">Atrasadas</span>
+              </label>
+
+              {/* Project Filter */}
+              <select
+                value={currentProject}
+                onChange={(e) => setCurrentProject(e.target.value)}
+                className={`bg-purple-600 hover:bg-purple-700 text-white border border-purple-700 rounded px-2 md:px-3 py-1 md:py-2 transition text-xs md:text-sm`}
+              >
+                <option value="all">Todos</option>
+                {projects.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+
+              {/* Limpar Filtros */}
+              {hasActiveFilters && (
+                <button
+                  onClick={() => {
+                    setSearchText('');
+                    setFilterStatus('');
+                    setFilterPriority('');
+                    setFilterOverdue(false);
+                  }}
+                  className={`flex items-center gap-1 px-2 md:px-3 py-1 md:py-2 ${darkMode ? 'bg-red-500/20 hover:bg-red-500/30 text-red-400' : 'bg-red-300/40 hover:bg-red-300/60 text-red-700'} rounded transition text-xs md:text-sm`}
+                >
+                  <X className="w-3 h-3 md:w-4 md:h-4" />
+                  <span className="hidden sm:inline">Limpar</span>
+                </button>
+              )}
+
+              {/* Upload */}
+              <label className={`p-1 md:p-2 ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/30 hover:bg-white/40'} rounded-lg transition cursor-pointer hidden md:block`}>
+                <Upload className="w-3 h-3 md:w-5 md:h-5" />
+                <input type="file" accept=".json" onChange={importData} className="hidden" />
+              </label>
+
+              {/* Mobile Filter Toggle */}
+              <button 
+                onClick={() => setShowMobileFilters(!showMobileFilters)}
+                className={`md:hidden p-1 md:p-2 ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/30 hover:bg-white/40'} rounded-lg transition ml-auto`}
+              >
+                <Filter className="w-4 h-4" />
               </button>
             </div>
           </div>
@@ -618,7 +690,7 @@ export default function FlowBoard() {
       <main className="flex-1 flex items-center justify-center p-4 overflow-hidden">
         <div className={`${darkMode ? 'bg-slate-900 border-white/20' : 'bg-white border-white/40'} border rounded-3xl w-full h-full overflow-hidden flex flex-col shadow-2xl animate-expand-panel`}>
           {/* Content Area with scroll */}
-          <div className="flex-1 overflow-y-auto overflow-x-hidden p-6">
+          <div className="flex-1 overflow-y-auto min-[1293px]:overflow-x-hidden max-[1292px]:overflow-x-auto p-6">
             <div className="animate-slide-in-content">
               {view === 'dashboard' && <DashboardView stats={stats} tasks={filteredTasks} darkMode={darkMode} />}
               {view === 'kanban' && (
@@ -791,20 +863,21 @@ function KanbanView({ tasks, moveTask, updateTask, deleteTask, toggleSubtask, se
 
   return (
     <div className="w-full h-full">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 auto-rows-max">
+      <div className="min-[1293px]:grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 auto-rows-max max-[1292px]:flex max-[1292px]:gap-4 max-[1292px]:pb-4">
         {columns.map(column => (
-          <KanbanColumn
-            key={column.id}
-            column={column}
-            tasks={tasks.filter(t => t.status === column.id)}
-            moveTask={moveTask}
-            updateTask={updateTask}
-            deleteTask={deleteTask}
-            toggleSubtask={toggleSubtask}
-            setEditingTask={setEditingTask}
-            darkMode={darkMode}
-            onEditFlow={onEditFlow}
-          />
+          <div key={column.id} className="max-[1292px]:flex-shrink-0 max-[1292px]:w-96">
+            <KanbanColumn
+              column={column}
+              tasks={tasks.filter(t => t.status === column.id)}
+              moveTask={moveTask}
+              updateTask={updateTask}
+              deleteTask={deleteTask}
+              toggleSubtask={toggleSubtask}
+              setEditingTask={setEditingTask}
+              darkMode={darkMode}
+              onEditFlow={onEditFlow}
+            />
+          </div>
         ))}
       </div>
     </div>
