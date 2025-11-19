@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit2, Calendar, Zap, BarChart3, CheckCircle2, Circle, ChevronDown, ChevronUp, Download, Upload } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Plus, Trash2, Edit2, Calendar, Zap, BarChart3, CheckCircle2, Circle, ChevronDown, ChevronUp, Download, Upload, GitBranch, Sun, Moon, Search, X, AlertTriangle, Bell } from 'lucide-react';
 
 // IndexedDB Manager
 const DB_NAME = 'FlowBoardDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 class IndexedDBManager {
   constructor() {
@@ -31,6 +31,10 @@ class IndexedDBManager {
         
         if (!db.objectStoreNames.contains('projects')) {
           db.createObjectStore('projects', { keyPath: 'id' });
+        }
+
+        if (!db.objectStoreNames.contains('settings')) {
+          db.createObjectStore('settings', { keyPath: 'key' });
         }
       };
     });
@@ -74,6 +78,13 @@ class IndexedDBManager {
     return tx.complete;
   }
 
+  async updateProject(project) {
+    const tx = this.db.transaction(['projects'], 'readwrite');
+    const store = tx.objectStore('projects');
+    await store.put(project);
+    return tx.complete;
+  }
+
   async getAllProjects() {
     return new Promise((resolve, reject) => {
       const tx = this.db.transaction(['projects'], 'readonly');
@@ -81,6 +92,23 @@ class IndexedDBManager {
       const request = store.getAll();
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve(request.result);
+    });
+  }
+
+  async saveSetting(key, value) {
+    const tx = this.db.transaction(['settings'], 'readwrite');
+    const store = tx.objectStore('settings');
+    await store.put({ key, value });
+    return tx.complete;
+  }
+
+  async getSetting(key) {
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction(['settings'], 'readonly');
+      const store = tx.objectStore('settings');
+      const request = store.get(key);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result?.value);
     });
   }
 }
@@ -98,12 +126,63 @@ const calculateImpact = (task) => {
   return Math.round((task.priority * (task.effort || 1)) / daysRemaining);
 };
 
+const isTaskOverdue = (task) => {
+  if (!task.dueDate || task.status === 'done') return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const due = new Date(task.dueDate);
+  due.setHours(0, 0, 0, 0);
+  return due < today;
+};
+
 const getPriorityColor = (priority) => {
   if (priority >= 80) return 'bg-red-500';
   if (priority >= 60) return 'bg-orange-500';
   if (priority >= 40) return 'bg-yellow-500';
   return 'bg-green-500';
 };
+
+// Templates de projetos
+const PROJECT_TEMPLATES = [
+  {
+    name: 'Desenvolvimento Web',
+    icon: '🌐',
+    description: 'Setup, Design, Frontend, Backend, QA, Deploy',
+    tasks: [
+      { title: 'Setup do Projeto', status: 'backlog', priority: 80, effort: 2 },
+      { title: 'Design UI/UX', status: 'backlog', priority: 70, effort: 8 },
+      { title: 'Desenvolvimento Frontend', status: 'backlog', priority: 75, effort: 16 },
+      { title: 'Desenvolvimento Backend', status: 'backlog', priority: 75, effort: 16 },
+      { title: 'QA e Testes', status: 'backlog', priority: 60, effort: 8 },
+      { title: 'Deploy em Produção', status: 'backlog', priority: 80, effort: 4 }
+    ]
+  },
+  {
+    name: 'Campanha de Marketing',
+    icon: '📢',
+    description: 'Pesquisa, Personas, Conteúdo, Ads, Analytics',
+    tasks: [
+      { title: 'Pesquisa de Mercado', status: 'backlog', priority: 70, effort: 6 },
+      { title: 'Definição de Personas', status: 'backlog', priority: 70, effort: 4 },
+      { title: 'Criação de Conteúdo', status: 'backlog', priority: 75, effort: 10 },
+      { title: 'Setup de Ads', status: 'backlog', priority: 80, effort: 8 },
+      { title: 'Análise de Resultados', status: 'backlog', priority: 60, effort: 4 }
+    ]
+  },
+  {
+    name: 'Aplicativo Mobile',
+    icon: '📱',
+    description: 'Arquitetura, Design, Features, API, Testes, Publicação',
+    tasks: [
+      { title: 'Definição de Arquitetura', status: 'backlog', priority: 85, effort: 4 },
+      { title: 'Design da Interface', status: 'backlog', priority: 70, effort: 8 },
+      { title: 'Implementação de Features', status: 'backlog', priority: 75, effort: 20 },
+      { title: 'Desenvolvimento da API', status: 'backlog', priority: 80, effort: 12 },
+      { title: 'Testes Automatizados', status: 'backlog', priority: 65, effort: 8 },
+      { title: 'Publicação nas Lojas', status: 'backlog', priority: 90, effort: 4 }
+    ]
+  }
+];
 
 // Componente Principal
 export default function FlowBoard() {
@@ -114,12 +193,27 @@ export default function FlowBoard() {
   const [showNewTask, setShowNewTask] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [dbReady, setDbReady] = useState(false);
+  const [darkMode, setDarkMode] = useState(true);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [automationsEnabled, setAutomationsEnabled] = useState(true);
+  const [notificationCount, setNotificationCount] = useState(0);
+  
+  // Filtros
+  const [searchText, setSearchText] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterPriority, setFilterPriority] = useState('');
+  const [filterOverdue, setFilterOverdue] = useState(false);
 
   // Inicializar DB
   useEffect(() => {
     dbManager.init().then(async () => {
       const loadedTasks = await dbManager.getAllTasks();
       const loadedProjects = await dbManager.getAllProjects();
+      const savedDarkMode = await dbManager.getSetting('darkMode');
+      const savedAutomations = await dbManager.getSetting('automationsEnabled');
+      
+      if (savedDarkMode !== undefined) setDarkMode(savedDarkMode);
+      if (savedAutomations !== undefined) setAutomationsEnabled(savedAutomations);
       
       if (loadedProjects.length === 0) {
         const defaultProjects = [
@@ -142,6 +236,30 @@ export default function FlowBoard() {
     });
   }, []);
 
+  // Salvar preferência de tema
+  useEffect(() => {
+    dbManager.saveSetting('darkMode', darkMode);
+  }, [darkMode]);
+
+  // Salvar preferência de automações
+  useEffect(() => {
+    dbManager.saveSetting('automationsEnabled', automationsEnabled);
+  }, [automationsEnabled]);
+
+  // Sistema de automações - detector de atrasadas
+  useEffect(() => {
+    if (!automationsEnabled) return;
+
+    const checkOverdue = () => {
+      const overdueTasks = tasks.filter(t => isTaskOverdue(t));
+      setNotificationCount(overdueTasks.length);
+    };
+
+    checkOverdue();
+    const interval = setInterval(checkOverdue, 60000); // Verificar a cada minuto
+    return () => clearInterval(interval);
+  }, [tasks, automationsEnabled]);
+
   const addTask = async (taskData) => {
     const newTask = {
       id: generateId(),
@@ -154,6 +272,34 @@ export default function FlowBoard() {
     await dbManager.addTask(newTask);
     setTasks([...tasks, newTask]);
     setShowNewTask(false);
+  };
+
+  const addTaskFromTemplate = async (templateTasks, templateName) => {
+    const projectData = {
+      id: generateId(),
+      name: templateName,
+      color: 'purple'
+    };
+
+    await dbManager.addProject(projectData);
+    setProjects([...projects, projectData]);
+
+    const newTasks = templateTasks.map(t => ({
+      id: generateId(),
+      ...t,
+      tag: templateName,
+      projectId: projectData.id,
+      createdAt: new Date().toISOString(),
+      subtasks: [],
+      flowData: null
+    }));
+
+    for (const task of newTasks) {
+      await dbManager.addTask(task);
+    }
+
+    setTasks([...tasks, ...newTasks]);
+    setShowTemplates(false);
   };
 
   const updateTask = async (updatedTask) => {
@@ -217,9 +363,41 @@ export default function FlowBoard() {
     }
   };
 
-  const filteredTasks = currentProject === 'all' 
+  // Aplicar filtros
+  let filteredTasks = currentProject === 'all' 
     ? tasks 
     : tasks.filter(t => t.projectId === currentProject);
+
+  if (searchText.trim()) {
+    const search = searchText.toLowerCase();
+    filteredTasks = filteredTasks.filter(t => 
+      t.title.toLowerCase().includes(search) || 
+      (t.description && t.description.toLowerCase().includes(search)) ||
+      (t.tag && t.tag.toLowerCase().includes(search))
+    );
+  }
+
+  if (filterStatus) {
+    filteredTasks = filteredTasks.filter(t => t.status === filterStatus);
+  }
+
+  if (filterPriority) {
+    const priorityMap = { 'alta': 80, 'média': 60, 'baixa': 40 };
+    const minPriority = priorityMap[filterPriority];
+    if (filterPriority === 'alta') {
+      filteredTasks = filteredTasks.filter(t => t.priority >= 80);
+    } else if (filterPriority === 'média') {
+      filteredTasks = filteredTasks.filter(t => t.priority >= 60 && t.priority < 80);
+    } else if (filterPriority === 'baixa') {
+      filteredTasks = filteredTasks.filter(t => t.priority < 60);
+    }
+  }
+
+  if (filterOverdue) {
+    filteredTasks = filteredTasks.filter(t => isTaskOverdue(t));
+  }
+
+  const hasActiveFilters = searchText.trim() || filterStatus || filterPriority || filterOverdue;
 
   const stats = {
     total: filteredTasks.length,
@@ -234,79 +412,180 @@ export default function FlowBoard() {
 
   if (!dbReady) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
-        <div className="text-white text-2xl animate-pulse">Inicializando FlowBoard...</div>
+      <div className={`min-h-screen ${darkMode ? 'bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900' : 'bg-gradient-to-br from-slate-50 via-purple-50 to-slate-50'} flex items-center justify-center`}>
+        <div className={`${darkMode ? 'text-white' : 'text-slate-900'} text-2xl animate-pulse`}>Inicializando FlowBoard...</div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white">
+    <div className={`min-h-screen ${darkMode ? 'bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white' : 'bg-gradient-to-br from-slate-50 via-purple-50 to-slate-50 text-slate-900'}`}>
       {/* Header */}
-      <header className="bg-black/30 backdrop-blur-lg border-b border-white/10 p-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-              ⚡ FlowBoard Offline
-            </h1>
-            <div className="flex gap-2">
+      <header className={`${darkMode ? 'bg-black/30' : 'bg-white/40'} backdrop-blur-lg border-b ${darkMode ? 'border-white/10' : 'border-white/40'} p-4`}>
+        <div className="max-w-7xl mx-auto">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-4">
+              <h1 className={`text-2xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent`}>
+                ⚡ FlowBoard
+              </h1>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setView('kanban')}
+                  className={`px-4 py-2 rounded-lg transition ${view === 'kanban' ? (darkMode ? 'bg-purple-600' : 'bg-purple-500') : (darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/30 hover:bg-white/40')}`}
+                >
+                  Kanban
+                </button>
+                <button
+                  onClick={() => setView('dashboard')}
+                  className={`px-4 py-2 rounded-lg transition ${view === 'dashboard' ? (darkMode ? 'bg-purple-600' : 'bg-purple-500') : (darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/30 hover:bg-white/40')}`}
+                >
+                  <BarChart3 className="w-5 h-5 inline mr-1" />
+                  Dashboard
+                </button>
+                <button
+                  onClick={() => setView('programmer')}
+                  className={`px-4 py-2 rounded-lg transition ${view === 'programmer' ? (darkMode ? 'bg-purple-600' : 'bg-purple-500') : (darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/30 hover:bg-white/40')}`}
+                >
+                  Programador
+                </button>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-3">
+              {/* Notificações */}
+              <div className="relative">
+                <button className={`p-2 ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/30 hover:bg-white/40'} rounded-lg transition relative`}>
+                  <Bell className="w-5 h-5" />
+                  {notificationCount > 0 && (
+                    <span className="absolute top-1 right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                      {notificationCount}
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              {/* Toggle Automações */}
               <button
-                onClick={() => setView('kanban')}
-                className={`px-4 py-2 rounded-lg transition ${view === 'kanban' ? 'bg-purple-600' : 'bg-white/10 hover:bg-white/20'}`}
+                onClick={() => setAutomationsEnabled(!automationsEnabled)}
+                className={`p-2 ${automationsEnabled ? 'bg-yellow-500/20 text-yellow-400' : (darkMode ? 'bg-white/10' : 'bg-white/30')} rounded-lg transition`}
+                title={automationsEnabled ? 'Automações ativas' : 'Automações inativas'}
               >
-                Kanban
+                <Zap className="w-5 h-5" />
               </button>
+
+              {/* Toggle Tema */}
               <button
-                onClick={() => setView('dashboard')}
-                className={`px-4 py-2 rounded-lg transition ${view === 'dashboard' ? 'bg-purple-600' : 'bg-white/10 hover:bg-white/20'}`}
+                onClick={() => setDarkMode(!darkMode)}
+                className={`p-2 ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/30 hover:bg-white/40'} rounded-lg transition`}
               >
-                <BarChart3 className="w-5 h-5 inline mr-1" />
-                Dashboard
-              </button>
-              <button
-                onClick={() => setView('programmer')}
-                className={`px-4 py-2 rounded-lg transition ${view === 'programmer' ? 'bg-purple-600' : 'bg-white/10 hover:bg-white/20'}`}
-              >
-                Programador
+                {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
               </button>
             </div>
           </div>
-          
-          <div className="flex items-center gap-4">
+
+          {/* Filtros */}
+          <div className={`flex flex-wrap gap-2 items-center ${darkMode ? 'bg-white/5' : 'bg-white/20'} p-3 rounded-lg`}>
+            <div className={`flex items-center gap-2 flex-1 ${darkMode ? 'bg-white/10' : 'bg-white/40'} rounded px-3 py-2`}>
+              <Search className="w-4 h-4" />
+              <input
+                type="text"
+                placeholder="Buscar tasks..."
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                className={`bg-transparent outline-none flex-1 ${darkMode ? 'text-white placeholder-white/50' : 'text-slate-900 placeholder-slate-600'}`}
+              />
+            </div>
+
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className={`${darkMode ? 'bg-white/10 border-white/20 text-white' : 'bg-white/40 border-white/60 text-slate-900'} border rounded px-3 py-2`}
+            >
+              <option value="">Todos os Status</option>
+              <option value="backlog">Backlog</option>
+              <option value="progress">Em Progresso</option>
+              <option value="review">Revisão</option>
+              <option value="done">Concluído</option>
+            </select>
+
+            <select
+              value={filterPriority}
+              onChange={(e) => setFilterPriority(e.target.value)}
+              className={`${darkMode ? 'bg-white/10 border-white/20 text-white' : 'bg-white/40 border-white/60 text-slate-900'} border rounded px-3 py-2`}
+            >
+              <option value="">Todas as Prioridades</option>
+              <option value="alta">Alta</option>
+              <option value="média">Média</option>
+              <option value="baixa">Baixa</option>
+            </select>
+
+            <label className={`flex items-center gap-2 px-3 py-2 ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/40 hover:bg-white/50'} rounded cursor-pointer transition`}>
+              <input
+                type="checkbox"
+                checked={filterOverdue}
+                onChange={(e) => setFilterOverdue(e.target.checked)}
+              />
+              <span className="text-sm">Atrasadas</span>
+            </label>
+
+            {hasActiveFilters && (
+              <button
+                onClick={() => {
+                  setSearchText('');
+                  setFilterStatus('');
+                  setFilterPriority('');
+                  setFilterOverdue(false);
+                }}
+                className={`flex items-center gap-1 px-3 py-2 ${darkMode ? 'bg-red-500/20 hover:bg-red-500/30 text-red-400' : 'bg-red-300/40 hover:bg-red-300/60 text-red-700'} rounded transition`}
+              >
+                <X className="w-4 h-4" />
+                Limpar
+              </button>
+            )}
+
             <select
               value={currentProject}
               onChange={(e) => setCurrentProject(e.target.value)}
-              className="bg-white/10 border border-white/20 rounded-lg px-4 py-2"
+              className={`${darkMode ? 'bg-white/10 border-white/20 text-white' : 'bg-white/40 border-white/60 text-slate-900'} border rounded px-3 py-2`}
             >
               <option value="all">Todos os Projetos</option>
               {projects.map(p => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
-            
-            <button onClick={exportData} className="p-2 bg-white/10 rounded-lg hover:bg-white/20 transition">
-              <Download className="w-5 h-5" />
-            </button>
-            
-            <label className="p-2 bg-white/10 rounded-lg hover:bg-white/20 transition cursor-pointer">
-              <Upload className="w-5 h-5" />
-              <input type="file" accept=".json" onChange={importData} className="hidden" />
-            </label>
-            
-            <button
-              onClick={() => setShowNewTask(true)}
-              className="bg-gradient-to-r from-purple-600 to-pink-600 px-4 py-2 rounded-lg hover:from-purple-700 hover:to-pink-700 transition flex items-center gap-2"
-            >
-              <Plus className="w-5 h-5" />
-              Nova Task
-            </button>
+
+            <div className="flex gap-2 ml-auto">
+              <button 
+                onClick={() => setShowTemplates(true)}
+                className={`px-4 py-2 rounded-lg transition ${darkMode ? 'bg-purple-600 hover:bg-purple-700' : 'bg-purple-500 hover:bg-purple-600'}`}
+              >
+                📋 Templates
+              </button>
+
+              <button onClick={exportData} className={`p-2 ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/30 hover:bg-white/40'} rounded-lg transition`}>
+                <Download className="w-5 h-5" />
+              </button>
+              
+              <label className={`p-2 ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/30 hover:bg-white/40'} rounded-lg transition cursor-pointer`}>
+                <Upload className="w-5 h-5" />
+                <input type="file" accept=".json" onChange={importData} className="hidden" />
+              </label>
+              
+              <button
+                onClick={() => setShowNewTask(true)}
+                className="bg-gradient-to-r from-purple-600 to-pink-600 px-4 py-2 rounded-lg hover:from-purple-700 hover:to-pink-700 transition flex items-center gap-2"
+              >
+                <Plus className="w-5 h-5" />
+                Nova Task
+              </button>
+            </div>
           </div>
         </div>
       </header>
 
       {/* Views */}
       <main className="max-w-7xl mx-auto p-6">
-        {view === 'dashboard' && <DashboardView stats={stats} tasks={filteredTasks} />}
+        {view === 'dashboard' && <DashboardView stats={stats} tasks={filteredTasks} darkMode={darkMode} />}
         {view === 'kanban' && (
           <KanbanView 
             tasks={filteredTasks} 
@@ -315,6 +594,7 @@ export default function FlowBoard() {
             deleteTask={deleteTask}
             toggleSubtask={toggleSubtask}
             setEditingTask={setEditingTask}
+            darkMode={darkMode}
           />
         )}
         {view === 'programmer' && (
@@ -322,6 +602,7 @@ export default function FlowBoard() {
             tasks={filteredTasks} 
             updateTask={updateTask}
             deleteTask={deleteTask}
+            darkMode={darkMode}
           />
         )}
       </main>
@@ -332,6 +613,7 @@ export default function FlowBoard() {
           onClose={() => setShowNewTask(false)}
           onSave={addTask}
           projects={projects}
+          darkMode={darkMode}
         />
       )}
       
@@ -341,6 +623,15 @@ export default function FlowBoard() {
           onClose={() => setEditingTask(null)}
           onSave={updateTask}
           projects={projects}
+          darkMode={darkMode}
+        />
+      )}
+
+      {showTemplates && (
+        <TemplateModal
+          onClose={() => setShowTemplates(false)}
+          onSelectTemplate={addTaskFromTemplate}
+          darkMode={darkMode}
         />
       )}
     </div>
@@ -348,7 +639,7 @@ export default function FlowBoard() {
 }
 
 // Dashboard View
-function DashboardView({ stats, tasks }) {
+function DashboardView({ stats, tasks, darkMode }) {
   const highPriorityTasks = tasks
     .filter(t => t.status !== 'done')
     .map(t => ({ ...t, impact: calculateImpact(t) }))
@@ -358,19 +649,19 @@ function DashboardView({ stats, tasks }) {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <StatCard title="Total" value={stats.total} color="purple" />
-        <StatCard title="Backlog" value={stats.backlog} color="gray" />
-        <StatCard title="Em Progresso" value={stats.progress} color="blue" />
-        <StatCard title="Revisão" value={stats.review} color="yellow" />
-        <StatCard title="Concluído" value={stats.done} color="green" />
+        <StatCard title="Total" value={stats.total} color="purple" darkMode={darkMode} />
+        <StatCard title="Backlog" value={stats.backlog} color="gray" darkMode={darkMode} />
+        <StatCard title="Em Progresso" value={stats.progress} color="blue" darkMode={darkMode} />
+        <StatCard title="Revisão" value={stats.review} color="yellow" darkMode={darkMode} />
+        <StatCard title="Concluído" value={stats.done} color="green" darkMode={darkMode} />
       </div>
 
-      <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20">
+      <div className={`${darkMode ? 'bg-white/10' : 'bg-white/40'} backdrop-blur-lg rounded-2xl p-6 border ${darkMode ? 'border-white/20' : 'border-white/60'}`}>
         <h3 className="text-xl font-bold mb-4">Taxa de Conclusão</h3>
         <div className="flex items-center gap-4">
-          <div className="flex-1 bg-white/5 rounded-full h-8 overflow-hidden">
+          <div className={`flex-1 ${darkMode ? 'bg-white/5' : 'bg-white/30'} rounded-full h-8 overflow-hidden`}>
             <div 
-              className="bg-gradient-to-r from-green-500 to-emerald-500 h-full transition-all duration-500 flex items-center justify-center text-sm font-bold"
+              className="bg-gradient-to-r from-green-500 to-emerald-500 h-full transition-all duration-500 flex items-center justify-center text-sm font-bold text-white"
               style={{ width: `${stats.completion}%` }}
             >
               {stats.completion > 10 && `${stats.completion}%`}
@@ -380,22 +671,22 @@ function DashboardView({ stats, tasks }) {
         </div>
       </div>
 
-      <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 border border-white/20">
+      <div className={`${darkMode ? 'bg-white/10' : 'bg-white/40'} backdrop-blur-lg rounded-2xl p-6 border ${darkMode ? 'border-white/20' : 'border-white/60'}`}>
         <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
           <Zap className="w-6 h-6 text-yellow-400" />
           Top 5 - Maior Impacto
         </h3>
         <div className="space-y-3">
           {highPriorityTasks.map((task, idx) => (
-            <div key={task.id} className="flex items-center gap-4 bg-white/5 p-4 rounded-lg">
+            <div key={task.id} className={`flex items-center gap-4 ${darkMode ? 'bg-white/5' : 'bg-white/30'} p-4 rounded-lg`}>
               <div className="text-2xl font-bold text-purple-400">#{idx + 1}</div>
               <div className="flex-1">
                 <div className="font-semibold">{task.title}</div>
-                <div className="text-sm text-white/60">{task.tag}</div>
+                <div className={`text-sm ${darkMode ? 'text-white/60' : 'text-slate-700'}`}>{task.tag}</div>
               </div>
               <div className="text-right">
                 <div className="text-2xl font-bold text-yellow-400">{task.impact}</div>
-                <div className="text-xs text-white/60">impacto</div>
+                <div className={`text-xs ${darkMode ? 'text-white/60' : 'text-slate-700'}`}>impacto</div>
               </div>
             </div>
           ))}
@@ -405,7 +696,7 @@ function DashboardView({ stats, tasks }) {
   );
 }
 
-function StatCard({ title, value, color }) {
+function StatCard({ title, value, color, darkMode }) {
   const colors = {
     purple: 'from-purple-600 to-purple-800',
     gray: 'from-gray-600 to-gray-800',
@@ -415,15 +706,15 @@ function StatCard({ title, value, color }) {
   };
 
   return (
-    <div className={`bg-gradient-to-br ${colors[color]} rounded-2xl p-6 border border-white/20`}>
-      <div className="text-white/80 text-sm mb-2">{title}</div>
-      <div className="text-4xl font-bold">{value}</div>
+    <div className={`bg-gradient-to-br ${colors[color]} rounded-2xl p-6 border ${darkMode ? 'border-white/20' : 'border-white/40'}`}>
+      <div className={`${darkMode ? 'text-white/80' : 'text-white'} text-sm mb-2`}>{title}</div>
+      <div className="text-4xl font-bold text-white">{value}</div>
     </div>
   );
 }
 
 // Kanban View
-function KanbanView({ tasks, moveTask, updateTask, deleteTask, toggleSubtask, setEditingTask }) {
+function KanbanView({ tasks, moveTask, updateTask, deleteTask, toggleSubtask, setEditingTask, darkMode }) {
   const columns = [
     { id: 'backlog', title: 'Backlog', color: 'gray' },
     { id: 'progress', title: 'Em Progresso', color: 'blue' },
@@ -443,19 +734,20 @@ function KanbanView({ tasks, moveTask, updateTask, deleteTask, toggleSubtask, se
           deleteTask={deleteTask}
           toggleSubtask={toggleSubtask}
           setEditingTask={setEditingTask}
+          darkMode={darkMode}
         />
       ))}
     </div>
   );
 }
 
-function KanbanColumn({ column, tasks, moveTask, updateTask, deleteTask, toggleSubtask, setEditingTask }) {
+function KanbanColumn({ column, tasks, moveTask, updateTask, deleteTask, toggleSubtask, setEditingTask, darkMode }) {
   const [draggedOver, setDraggedOver] = useState(false);
 
   return (
     <div 
-      className={`bg-white/5 backdrop-blur-lg rounded-2xl p-4 border-2 transition ${
-        draggedOver ? 'border-purple-500 bg-white/10' : 'border-white/10'
+      className={`${darkMode ? 'bg-white/5' : 'bg-white/30'} backdrop-blur-lg rounded-2xl p-4 border-2 transition ${
+        draggedOver ? (darkMode ? 'border-purple-500 bg-white/10' : 'border-purple-500 bg-white/40') : (darkMode ? 'border-white/10' : 'border-white/30')
       }`}
       onDragOver={(e) => {
         e.preventDefault();
@@ -469,9 +761,9 @@ function KanbanColumn({ column, tasks, moveTask, updateTask, deleteTask, toggleS
         moveTask(taskId, column.id);
       }}
     >
-      <h3 className="font-bold text-lg mb-4 flex items-center justify-between">
+      <h3 className={`font-bold text-lg mb-4 flex items-center justify-between`}>
         <span>{column.title}</span>
-        <span className="bg-white/10 px-2 py-1 rounded-full text-sm">{tasks.length}</span>
+        <span className={`${darkMode ? 'bg-white/10' : 'bg-white/40'} px-2 py-1 rounded-full text-sm`}>{tasks.length}</span>
       </h3>
       
       <div className="space-y-3">
@@ -483,6 +775,7 @@ function KanbanColumn({ column, tasks, moveTask, updateTask, deleteTask, toggleS
             deleteTask={deleteTask}
             toggleSubtask={toggleSubtask}
             setEditingTask={setEditingTask}
+            darkMode={darkMode}
           />
         ))}
       </div>
@@ -490,14 +783,16 @@ function KanbanColumn({ column, tasks, moveTask, updateTask, deleteTask, toggleS
   );
 }
 
-function TaskCard({ task, updateTask, deleteTask, toggleSubtask, setEditingTask }) {
+function TaskCard({ task, updateTask, deleteTask, toggleSubtask, setEditingTask, darkMode }) {
   const [expanded, setExpanded] = useState(false);
   const [showSubtaskInput, setShowSubtaskInput] = useState(false);
   const [newSubtask, setNewSubtask] = useState('');
+  const [showFlowEditor, setShowFlowEditor] = useState(false);
 
   const completedSubtasks = task.subtasks?.filter(st => st.completed).length || 0;
   const totalSubtasks = task.subtasks?.length || 0;
   const progress = totalSubtasks > 0 ? (completedSubtasks / totalSubtasks) * 100 : 0;
+  const isOverdue = isTaskOverdue(task);
 
   const addSubtask = () => {
     if (newSubtask.trim()) {
@@ -512,141 +807,166 @@ function TaskCard({ task, updateTask, deleteTask, toggleSubtask, setEditingTask 
   };
 
   return (
-    <div
-      draggable
-      onDragStart={(e) => e.dataTransfer.setData('taskId', task.id)}
-      className="bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20 hover:border-purple-500 transition cursor-move"
-    >
-      <div className="flex items-start justify-between mb-2">
-        <div className="flex-1">
-          <div className={`w-2 h-2 rounded-full ${getPriorityColor(task.priority)} inline-block mr-2`} />
-          <span className="font-semibold">{task.title}</span>
-        </div>
-        <div className="flex gap-1">
-          <button
-            onClick={() => setEditingTask(task)}
-            className="p-1 hover:bg-white/10 rounded"
-          >
-            <Edit2 className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => deleteTask(task.id)}
-            className="p-1 hover:bg-red-500/20 rounded"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => setExpanded(!expanded)}
-            className="p-1 hover:bg-white/10 rounded"
-          >
-            {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-          </button>
-        </div>
-      </div>
-
-      {task.description && (
-        <p className="text-sm text-white/70 mb-2">{task.description}</p>
-      )}
-
-      <div className="flex items-center gap-2 text-xs text-white/60 mb-2">
-        {task.tag && <span className="bg-white/10 px-2 py-1 rounded">{task.tag}</span>}
-        {task.dueDate && (
-          <span className="flex items-center gap-1">
-            <Calendar className="w-3 h-3" />
-            {new Date(task.dueDate).toLocaleDateString('pt-BR')}
-          </span>
-        )}
-        {task.effort && (
-          <span className="flex items-center gap-1">
-            <Zap className="w-3 h-3" />
-            {task.effort}h
-          </span>
-        )}
-      </div>
-
-      {totalSubtasks > 0 && (
-        <div className="mb-2">
-          <div className="flex items-center justify-between text-xs mb-1">
-            <span>{completedSubtasks}/{totalSubtasks} subtasks</span>
-            <span>{Math.round(progress)}%</span>
-          </div>
-          <div className="bg-white/5 rounded-full h-2 overflow-hidden">
-            <div
-              className="bg-gradient-to-r from-purple-500 to-pink-500 h-full transition-all duration-300"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-        </div>
-      )}
-
-      {expanded && (
-        <div className="mt-3 pt-3 border-t border-white/10 space-y-2">
-          {task.subtasks?.map((subtask, idx) => (
-            <div key={idx} className="flex items-center gap-2 text-sm">
-              <button
-                onClick={() => toggleSubtask(task.id, idx)}
-                className="flex-shrink-0"
-              >
-                {subtask.completed ? (
-                  <CheckCircle2 className="w-4 h-4 text-green-500" />
-                ) : (
-                  <Circle className="w-4 h-4 text-white/40" />
-                )}
-              </button>
-              <span className={subtask.completed ? 'line-through text-white/50' : ''}>
-                {subtask.text}
-              </span>
+    <>
+      <div
+        draggable
+        onDragStart={(e) => e.dataTransfer.setData('taskId', task.id)}
+        className={`${darkMode ? 'bg-white/10 border-white/20 hover:border-purple-500' : 'bg-white/40 border-white/40 hover:border-purple-400'} backdrop-blur-lg rounded-xl p-4 border transition cursor-move ${isOverdue ? 'ring-2 ring-red-500' : ''}`}
+      >
+        <div className="flex items-start justify-between mb-2">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-1">
+              <div className={`w-2 h-2 rounded-full ${getPriorityColor(task.priority)} inline-block`} />
+              <span className="font-semibold">{task.title}</span>
+              {isOverdue && <AlertTriangle className="w-4 h-4 text-red-500" />}
             </div>
-          ))}
-
-          {showSubtaskInput ? (
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={newSubtask}
-                onChange={(e) => setNewSubtask(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && addSubtask()}
-                placeholder="Nova subtask..."
-                className="flex-1 bg-white/5 border border-white/20 rounded px-2 py-1 text-sm"
-                autoFocus
-              />
-              <button onClick={addSubtask} className="text-green-500">✓</button>
-              <button onClick={() => setShowSubtaskInput(false)} className="text-red-500">✕</button>
-            </div>
-          ) : (
+            {isOverdue && <span className="text-xs text-red-500 font-bold">ATRASADA</span>}
+          </div>
+          <div className="flex gap-1">
             <button
-              onClick={() => setShowSubtaskInput(true)}
-              className="text-xs text-purple-400 hover:text-purple-300 flex items-center gap-1"
+              onClick={() => setShowFlowEditor(true)}
+              className={`p-1 ${darkMode ? 'hover:bg-white/10' : 'hover:bg-white/30'} rounded`}
+              title="Editor de Fluxograma"
             >
-              <Plus className="w-3 h-3" />
-              Adicionar subtask
+              <GitBranch className="w-4 h-4" />
             </button>
+            <button
+              onClick={() => setEditingTask(task)}
+              className={`p-1 ${darkMode ? 'hover:bg-white/10' : 'hover:bg-white/30'} rounded`}
+            >
+              <Edit2 className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => deleteTask(task.id)}
+              className={`p-1 ${darkMode ? 'hover:bg-red-500/20' : 'hover:bg-red-300/40'} rounded`}
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setExpanded(!expanded)}
+              className={`p-1 ${darkMode ? 'hover:bg-white/10' : 'hover:bg-white/30'} rounded`}
+            >
+              {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+          </div>
+        </div>
+
+        {task.description && (
+          <p className={`text-sm ${darkMode ? 'text-white/70' : 'text-slate-700'} mb-2`}>{task.description}</p>
+        )}
+
+        <div className={`flex items-center gap-2 text-xs ${darkMode ? 'text-white/60' : 'text-slate-700'} mb-2`}>
+          {task.tag && <span className={`${darkMode ? 'bg-white/10' : 'bg-white/40'} px-2 py-1 rounded`}>{task.tag}</span>}
+          {task.dueDate && (
+            <span className="flex items-center gap-1">
+              <Calendar className="w-3 h-3" />
+              {new Date(task.dueDate).toLocaleDateString('pt-BR')}
+            </span>
+          )}
+          {task.effort && (
+            <span className="flex items-center gap-1">
+              <Zap className="w-3 h-3" />
+              {task.effort}h
+            </span>
           )}
         </div>
+
+        {totalSubtasks > 0 && (
+          <div className="mb-2">
+            <div className={`flex items-center justify-between text-xs mb-1 ${darkMode ? 'text-white/60' : 'text-slate-700'}`}>
+              <span>{completedSubtasks}/{totalSubtasks} subtasks</span>
+              <span>{Math.round(progress)}%</span>
+            </div>
+            <div className={`${darkMode ? 'bg-white/5' : 'bg-white/30'} rounded-full h-2 overflow-hidden`}>
+              <div
+                className="bg-gradient-to-r from-purple-500 to-pink-500 h-full transition-all duration-300"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        {expanded && (
+          <div className={`mt-3 pt-3 ${darkMode ? 'border-t border-white/10' : 'border-t border-white/30'} space-y-2`}>
+            {task.subtasks?.map((subtask, idx) => (
+              <div key={idx} className="flex items-center gap-2 text-sm">
+                <button
+                  onClick={() => toggleSubtask(task.id, idx)}
+                  className="flex-shrink-0"
+                >
+                  {subtask.completed ? (
+                    <CheckCircle2 className="w-4 h-4 text-green-500" />
+                  ) : (
+                    <Circle className={`w-4 h-4 ${darkMode ? 'text-white/40' : 'text-slate-400'}`} />
+                  )}
+                </button>
+                <span className={subtask.completed ? (darkMode ? 'line-through text-white/50' : 'line-through text-slate-600') : ''}>
+                  {subtask.text}
+                </span>
+              </div>
+            ))}
+
+            {showSubtaskInput ? (
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newSubtask}
+                  onChange={(e) => setNewSubtask(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && addSubtask()}
+                  placeholder="Nova subtask..."
+                  className={`flex-1 ${darkMode ? 'bg-white/5 border-white/20 text-white' : 'bg-white/30 border-white/40 text-slate-900'} border rounded px-2 py-1 text-sm`}
+                  autoFocus
+                />
+                <button onClick={addSubtask} className="text-green-500">✓</button>
+                <button onClick={() => setShowSubtaskInput(false)} className="text-red-500">✕</button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowSubtaskInput(true)}
+                className={`text-xs flex items-center gap-1 ${darkMode ? 'text-purple-400 hover:text-purple-300' : 'text-purple-600 hover:text-purple-700'}`}
+              >
+                <Plus className="w-3 h-3" />
+                Adicionar subtask
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {showFlowEditor && (
+        <FlowEditorModal
+          task={task}
+          onClose={() => setShowFlowEditor(false)}
+          onSave={(flowData) => {
+            updateTask({ ...task, flowData });
+            setShowFlowEditor(false);
+          }}
+          darkMode={darkMode}
+        />
       )}
-    </div>
+    </>
   );
 }
 
 // Programmer View
-function ProgrammerView({ tasks, updateTask, deleteTask }) {
+function ProgrammerView({ tasks, updateTask, deleteTask, darkMode }) {
   const sortedTasks = [...tasks]
     .filter(t => t.status !== 'done')
     .sort((a, b) => calculateImpact(b) - calculateImpact(a));
 
   return (
     <div className="space-y-3">
-      <div className="bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20">
+      <div className={`${darkMode ? 'bg-white/10 border-white/20' : 'bg-white/40 border-white/40'} backdrop-blur-lg rounded-xl p-4 border`}>
         <h3 className="text-lg font-bold mb-2">Atalhos</h3>
-        <p className="text-sm text-white/70">
-          <kbd className="bg-white/10 px-2 py-1 rounded">C</kbd> = Marcar como concluída
+        <p className={`text-sm ${darkMode ? 'text-white/70' : 'text-slate-700'}`}>
+          <kbd className={`${darkMode ? 'bg-white/10' : 'bg-white/40'} px-2 py-1 rounded`}>C</kbd> = Marcar como concluída
         </p>
       </div>
 
       {sortedTasks.map((task, idx) => (
         <div
           key={task.id}
-          className="bg-white/10 backdrop-blur-lg rounded-xl p-4 border border-white/20 hover:border-purple-500 transition"
+          className={`${darkMode ? 'bg-white/10 border-white/20 hover:border-purple-500' : 'bg-white/40 border-white/40 hover:border-purple-400'} backdrop-blur-lg rounded-xl p-4 border transition ${isTaskOverdue(task) ? 'ring-2 ring-red-500' : ''}`}
           tabIndex={0}
           onKeyPress={(e) => {
             if (e.key === 'c' || e.key === 'C') {
@@ -660,19 +980,21 @@ function ProgrammerView({ tasks, updateTask, deleteTask }) {
               <div className="flex items-center gap-2 mb-1">
                 <div className={`w-3 h-3 rounded-full ${getPriorityColor(task.priority)}`} />
                 <span className="font-semibold text-lg">{task.title}</span>
-                {task.tag && <span className="bg-white/10 px-2 py-1 rounded text-xs">{task.tag}</span>}
+                {isTaskOverdue(task) && <AlertTriangle className="w-4 h-4 text-red-500" />}
+                {task.tag && <span className={`${darkMode ? 'bg-white/10' : 'bg-white/40'} px-2 py-1 rounded text-xs`}>{task.tag}</span>}
               </div>
+              {isTaskOverdue(task) && <span className="text-xs text-red-500 font-bold">ATRASADA</span>}
               {task.description && (
-                <p className="text-sm text-white/70">{task.description}</p>
+                <p className={`text-sm ${darkMode ? 'text-white/70' : 'text-slate-700'}`}>{task.description}</p>
               )}
             </div>
             <div className="text-right">
               <div className="text-2xl font-bold text-yellow-400">{calculateImpact(task)}</div>
-              <div className="text-xs text-white/60">impacto</div>
+              <div className={`text-xs ${darkMode ? 'text-white/60' : 'text-slate-700'}`}>impacto</div>
             </div>
             <button
               onClick={() => deleteTask(task.id)}
-              className="p-2 hover:bg-red-500/20 rounded"
+              className={`p-2 ${darkMode ? 'hover:bg-red-500/20' : 'hover:bg-red-300/40'} rounded`}
             >
               <Trash2 className="w-5 h-5" />
             </button>
@@ -684,7 +1006,7 @@ function ProgrammerView({ tasks, updateTask, deleteTask }) {
 }
 
 // Task Modal
-function TaskModal({ task, onClose, onSave, projects }) {
+function TaskModal({ task, onClose, onSave, projects, darkMode }) {
   const [formData, setFormData] = useState(task || {
     title: '',
     description: '',
@@ -704,8 +1026,8 @@ function TaskModal({ task, onClose, onSave, projects }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div className="bg-slate-900 border border-white/20 rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+    <div className={`fixed inset-0 ${darkMode ? 'bg-black/50' : 'bg-black/30'} backdrop-blur-sm flex items-center justify-center p-4 z-50`}>
+      <div className={`${darkMode ? 'bg-slate-900 border-white/20' : 'bg-slate-100 border-white/60'} border rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto`}>
         <h2 className="text-2xl font-bold mb-4">
           {task ? 'Editar Task' : 'Nova Task'}
         </h2>
@@ -717,7 +1039,7 @@ function TaskModal({ task, onClose, onSave, projects }) {
               type="text"
               value={formData.title}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-white/50"
+              className={`w-full ${darkMode ? 'bg-white/10 border-white/20 text-white placeholder-white/50' : 'bg-white border-slate-300 text-slate-900 placeholder-slate-600'} border rounded-lg px-4 py-2`}
               placeholder="Digite o título da task"
               required
             />
@@ -728,7 +1050,7 @@ function TaskModal({ task, onClose, onSave, projects }) {
             <textarea
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 h-24 text-white placeholder-white/50"
+              className={`w-full h-24 ${darkMode ? 'bg-white/10 border-white/20 text-white placeholder-white/50' : 'bg-white border-slate-300 text-slate-900 placeholder-slate-600'} border rounded-lg px-4 py-2`}
               placeholder="Digite a descrição da task"
             />
           </div>
@@ -744,7 +1066,7 @@ function TaskModal({ task, onClose, onSave, projects }) {
                 onChange={(e) => setFormData({ ...formData, priority: parseInt(e.target.value) })}
                 className="w-full"
               />
-              <div className="text-sm text-white/60 mt-1">{formData.priority}</div>
+              <div className={`text-sm mt-1 ${darkMode ? 'text-white/60' : 'text-slate-600'}`}>{formData.priority}</div>
             </div>
 
             <div>
@@ -755,7 +1077,7 @@ function TaskModal({ task, onClose, onSave, projects }) {
                 step="0.5"
                 value={formData.effort}
                 onChange={(e) => setFormData({ ...formData, effort: parseFloat(e.target.value) })}
-                className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white"
+                className={`w-full ${darkMode ? 'bg-white/10 border-white/20 text-white' : 'bg-white border-slate-300 text-slate-900'} border rounded-lg px-4 py-2`}
               />
             </div>
           </div>
@@ -767,7 +1089,7 @@ function TaskModal({ task, onClose, onSave, projects }) {
                 type="date"
                 value={formData.dueDate}
                 onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
-                className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white"
+                className={`w-full ${darkMode ? 'bg-white/10 border-white/20 text-white' : 'bg-white border-slate-300 text-slate-900'} border rounded-lg px-4 py-2`}
               />
             </div>
 
@@ -777,7 +1099,7 @@ function TaskModal({ task, onClose, onSave, projects }) {
                 type="text"
                 value={formData.tag}
                 onChange={(e) => setFormData({ ...formData, tag: e.target.value })}
-                className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-white/50"
+                className={`w-full ${darkMode ? 'bg-white/10 border-white/20 text-white placeholder-white/50' : 'bg-white border-slate-300 text-slate-900 placeholder-slate-600'} border rounded-lg px-4 py-2`}
                 placeholder="ex: frontend, backend"
               />
             </div>
@@ -789,7 +1111,7 @@ function TaskModal({ task, onClose, onSave, projects }) {
               <select
                 value={formData.projectId}
                 onChange={(e) => setFormData({ ...formData, projectId: e.target.value })}
-                className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white"
+                className={`w-full ${darkMode ? 'bg-white/10 border-white/20 text-white' : 'bg-white border-slate-300 text-slate-900'} border rounded-lg px-4 py-2`}
               >
                 {projects.map(p => (
                   <option key={p.id} value={p.id}>{p.name}</option>
@@ -802,7 +1124,7 @@ function TaskModal({ task, onClose, onSave, projects }) {
               <select
                 value={formData.status}
                 onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white"
+                className={`w-full ${darkMode ? 'bg-white/10 border-white/20 text-white' : 'bg-white border-slate-300 text-slate-900'} border rounded-lg px-4 py-2`}
               >
                 <option value="backlog">Backlog</option>
                 <option value="progress">Em Progresso</option>
@@ -812,22 +1134,242 @@ function TaskModal({ task, onClose, onSave, projects }) {
             </div>
           </div>
 
-          <div className="flex gap-4 pt-4 border-t border-white/10">
+          <div className={`flex gap-4 pt-4 border-t ${darkMode ? 'border-white/10' : 'border-slate-300'}`}>
             <button
               type="submit"
-              className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 rounded-lg py-2 font-semibold transition"
+              className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 rounded-lg py-2 font-semibold transition text-white"
             >
               {task ? 'Atualizar' : 'Criar'} Task
             </button>
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 bg-white/10 hover:bg-white/20 rounded-lg py-2 font-semibold transition"
+              className={`flex-1 ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-slate-300 hover:bg-slate-400'} rounded-lg py-2 font-semibold transition`}
             >
               Cancelar
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+// Flow Editor Modal
+function FlowEditorModal({ task, onClose, onSave, darkMode }) {
+  const [nodes, setNodes] = useState(task.flowData?.nodes || [
+    { id: '1', label: 'Início', x: 100, y: 100 }
+  ]);
+  const [connections, setConnections] = useState(task.flowData?.connections || []);
+  const [selectedNode, setSelectedNode] = useState(null);
+  const [draggingNode, setDraggingNode] = useState(null);
+  const canvasRef = useRef(null);
+
+  const addNode = () => {
+    const newNode = {
+      id: Date.now().toString(),
+      label: `Nó ${nodes.length + 1}`,
+      x: Math.random() * 400 + 50,
+      y: Math.random() * 300 + 50
+    };
+    setNodes([...nodes, newNode]);
+  };
+
+  const deleteNode = (id) => {
+    setNodes(nodes.filter(n => n.id !== id));
+    setConnections(connections.filter(c => c.from !== id && c.to !== id));
+  };
+
+  const connectNodes = (fromId, toId) => {
+    if (fromId !== toId && !connections.find(c => c.from === fromId && c.to === toId)) {
+      setConnections([...connections, { from: fromId, to: toId }]);
+    }
+  };
+
+  const handleNodeDragStart = (e, nodeId) => {
+    setDraggingNode(nodeId);
+  };
+
+  const handleNodeDragMove = (e) => {
+    if (!draggingNode || !canvasRef.current) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    setNodes(nodes.map(n => n.id === draggingNode ? { ...n, x, y } : n));
+  };
+
+  const handleNodeDragEnd = () => {
+    setDraggingNode(null);
+  };
+
+  return (
+    <div className={`fixed inset-0 ${darkMode ? 'bg-black/50' : 'bg-black/30'} backdrop-blur-sm flex items-center justify-center p-4 z-50`}>
+      <div className={`${darkMode ? 'bg-slate-900 border-white/20' : 'bg-slate-100 border-white/60'} border rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto`}>
+        <h2 className="text-2xl font-bold mb-4">📊 Editor de Fluxograma - {task.title}</h2>
+        
+        <div className="flex gap-4">
+          <div className="flex-1">
+            <div className={`${darkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-300'} border rounded-lg p-4 mb-4 relative`} style={{ minHeight: '400px' }}>
+              <svg
+                ref={canvasRef}
+                className="w-full h-full absolute inset-0"
+                onMouseMove={handleNodeDragMove}
+                onMouseUp={handleNodeDragEnd}
+                onMouseLeave={handleNodeDragEnd}
+              >
+                {connections.map((conn, idx) => {
+                  const fromNode = nodes.find(n => n.id === conn.from);
+                  const toNode = nodes.find(n => n.id === conn.to);
+                  if (!fromNode || !toNode) return null;
+                  return (
+                    <line
+                      key={idx}
+                      x1={fromNode.x + 40}
+                      y1={fromNode.y + 20}
+                      x2={toNode.x + 40}
+                      y2={toNode.y + 20}
+                      stroke={darkMode ? '#a78bfa' : '#9333ea'}
+                      strokeWidth="2"
+                      markerEnd="url(#arrowhead)"
+                    />
+                  );
+                })}
+                <defs>
+                  <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                    <polygon points="0 0, 10 3, 0 6" fill={darkMode ? '#a78bfa' : '#9333ea'} />
+                  </marker>
+                </defs>
+              </svg>
+
+              <div className="relative z-10 p-4">
+                {nodes.map(node => (
+                  <div
+                    key={node.id}
+                    draggable
+                    onDragStart={(e) => handleNodeDragStart(e, node.id)}
+                    onClick={() => setSelectedNode(node.id)}
+                    className={`absolute w-24 h-12 rounded-lg flex items-center justify-center cursor-move text-sm font-semibold transition ${
+                      selectedNode === node.id
+                        ? `${darkMode ? 'bg-purple-600 border-white' : 'bg-purple-500 border-purple-700'}`
+                        : `${darkMode ? 'bg-purple-800/50 border-purple-400' : 'bg-purple-300/50 border-purple-600'}`
+                    } border-2 text-center`}
+                    style={{ left: `${node.x}px`, top: `${node.y}px`, cursor: 'grab' }}
+                  >
+                    {node.label}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={addNode}
+                className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-white text-sm font-semibold"
+              >
+                + Adicionar Nó
+              </button>
+              {selectedNode && (
+                <>
+                  <button
+                    onClick={() => deleteNode(selectedNode)}
+                    className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded text-white text-sm font-semibold"
+                  >
+                    🗑️ Deletar Nó
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (selectedNode) {
+                        const otherNodes = nodes.filter(n => n.id !== selectedNode);
+                        if (otherNodes.length > 0) {
+                          connectNodes(selectedNode, otherNodes[0].id);
+                        }
+                      }
+                    }}
+                    className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-white text-sm font-semibold"
+                  >
+                    🔗 Conectar
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="w-64">
+            <h3 className="font-bold mb-3">Nós ({nodes.length})</h3>
+            <div className={`${darkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-300'} border rounded p-3 space-y-2 max-h-96 overflow-y-auto`}>
+              {nodes.map(node => (
+                <div
+                  key={node.id}
+                  onClick={() => setSelectedNode(node.id)}
+                  className={`p-2 rounded cursor-pointer text-sm ${selectedNode === node.id ? (darkMode ? 'bg-purple-600' : 'bg-purple-500') : (darkMode ? 'bg-white/10' : 'bg-slate-200')}`}
+                >
+                  {node.label}
+                </div>
+              ))}
+            </div>
+
+            <h3 className="font-bold mb-3 mt-4">Conexões ({connections.length})</h3>
+            <div className={`${darkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-300'} border rounded p-3 space-y-2 max-h-40 overflow-y-auto text-xs`}>
+              {connections.map((conn, idx) => (
+                <div key={idx} className={darkMode ? 'bg-white/10' : 'bg-slate-200'} style={{ padding: '4px', borderRadius: '4px' }}>
+                  {nodes.find(n => n.id === conn.from)?.label} → {nodes.find(n => n.id === conn.to)?.label}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className={`flex gap-4 pt-4 mt-4 border-t ${darkMode ? 'border-white/10' : 'border-slate-300'}`}>
+          <button
+            onClick={() => onSave({ nodes, connections })}
+            className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 rounded-lg py-2 font-semibold transition text-white"
+          >
+            💾 Salvar Fluxograma
+          </button>
+          <button
+            onClick={onClose}
+            className={`flex-1 ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-slate-300 hover:bg-slate-400'} rounded-lg py-2 font-semibold transition`}
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Template Modal
+function TemplateModal({ onClose, onSelectTemplate, darkMode }) {
+  return (
+    <div className={`fixed inset-0 ${darkMode ? 'bg-black/50' : 'bg-black/30'} backdrop-blur-sm flex items-center justify-center p-4 z-50`}>
+      <div className={`${darkMode ? 'bg-slate-900 border-white/20' : 'bg-slate-100 border-white/60'} border rounded-2xl p-6 max-w-3xl w-full`}>
+        <h2 className="text-2xl font-bold mb-6">📋 Selecione um Template</h2>
+        
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          {PROJECT_TEMPLATES.map((template, idx) => (
+            <div
+              key={idx}
+              onClick={() => onSelectTemplate(template.tasks, template.name)}
+              className={`${darkMode ? 'bg-white/10 border-white/20 hover:bg-white/20 cursor-pointer' : 'bg-white border-slate-300 hover:bg-slate-50 cursor-pointer'} border rounded-xl p-6 transition`}
+            >
+              <div className="text-4xl mb-2">{template.icon}</div>
+              <h3 className="font-bold text-lg mb-2">{template.name}</h3>
+              <p className={`text-sm ${darkMode ? 'text-white/70' : 'text-slate-700'} mb-3`}>
+                {template.description}
+              </p>
+              <button className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 rounded font-semibold transition">
+                Usar Template
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <button
+          onClick={onClose}
+          className={`w-full ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-slate-300 hover:bg-slate-400'} rounded-lg py-2 font-semibold transition`}
+        >
+          Cancelar
+        </button>
       </div>
     </div>
   );
