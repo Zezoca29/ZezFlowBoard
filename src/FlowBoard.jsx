@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Edit2, Calendar, Zap, BarChart3, CheckCircle2, Circle, ChevronDown, ChevronUp, Download, Upload, GitBranch, Sun, Moon, Search, X, AlertTriangle, Bell } from 'lucide-react';
 
 // IndexedDB Manager
@@ -96,19 +96,39 @@ class IndexedDBManager {
   }
 
   async saveSetting(key, value) {
-    const tx = this.db.transaction(['settings'], 'readwrite');
-    const store = tx.objectStore('settings');
-    await store.put({ key, value });
-    return tx.complete;
+    if (!this.db) {
+      console.warn('IndexedDB not initialized for saveSetting');
+      return Promise.resolve();
+    }
+    return new Promise((resolve, reject) => {
+      try {
+        const tx = this.db.transaction(['settings'], 'readwrite');
+        const store = tx.objectStore('settings');
+        store.put({ key, value });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      } catch (error) {
+        console.warn('Error saving setting:', error);
+        resolve(); // Don't reject, just resolve with warning
+      }
+    });
   }
 
   async getSetting(key) {
+    if (!this.db) {
+      return undefined;
+    }
     return new Promise((resolve, reject) => {
-      const tx = this.db.transaction(['settings'], 'readonly');
-      const store = tx.objectStore('settings');
-      const request = store.get(key);
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result?.value);
+      try {
+        const tx = this.db.transaction(['settings'], 'readonly');
+        const store = tx.objectStore('settings');
+        const request = store.get(key);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result?.value);
+      } catch (error) {
+        console.warn('Error getting setting:', error);
+        resolve(undefined);
+      }
     });
   }
 }
@@ -197,6 +217,9 @@ export default function FlowBoard() {
   const [showTemplates, setShowTemplates] = useState(false);
   const [automationsEnabled, setAutomationsEnabled] = useState(true);
   const [notificationCount, setNotificationCount] = useState(0);
+  const [showFlowEditor, setShowFlowEditor] = useState(false);
+  const [editingFlowTask, setEditingFlowTask] = useState(null);
+  const [taskToDelete, setTaskToDelete] = useState(null);
   
   // Filtros
   const [searchText, setSearchText] = useState('');
@@ -238,13 +261,17 @@ export default function FlowBoard() {
 
   // Salvar preferência de tema
   useEffect(() => {
-    dbManager.saveSetting('darkMode', darkMode);
-  }, [darkMode]);
+    if (dbReady) {
+      dbManager.saveSetting('darkMode', darkMode).catch(() => {});
+    }
+  }, [darkMode, dbReady]);
 
   // Salvar preferência de automações
   useEffect(() => {
-    dbManager.saveSetting('automationsEnabled', automationsEnabled);
-  }, [automationsEnabled]);
+    if (dbReady) {
+      dbManager.saveSetting('automationsEnabled', automationsEnabled).catch(() => {});
+    }
+  }, [automationsEnabled, dbReady]);
 
   // Sistema de automações - detector de atrasadas
   useEffect(() => {
@@ -309,8 +336,14 @@ export default function FlowBoard() {
   };
 
   const deleteTask = async (id) => {
+    const task = tasks.find(t => t.id === id);
+    setTaskToDelete(task);
+  };
+
+  const confirmDeleteTask = async (id) => {
     await dbManager.deleteTask(id);
     setTasks(tasks.filter(t => t.id !== id));
+    setTaskToDelete(null);
   };
 
   const moveTask = async (taskId, newStatus) => {
@@ -382,8 +415,6 @@ export default function FlowBoard() {
   }
 
   if (filterPriority) {
-    const priorityMap = { 'alta': 80, 'média': 60, 'baixa': 40 };
-    const minPriority = priorityMap[filterPriority];
     if (filterPriority === 'alta') {
       filteredTasks = filteredTasks.filter(t => t.priority >= 80);
     } else if (filterPriority === 'média') {
@@ -419,9 +450,9 @@ export default function FlowBoard() {
   }
 
   return (
-    <div className={`min-h-screen ${darkMode ? 'bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white' : 'bg-gradient-to-br from-slate-50 via-purple-50 to-slate-50 text-slate-900'}`}>
+    <div className={`h-screen w-screen overflow-hidden ${darkMode ? 'bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white' : 'bg-gradient-to-br from-slate-50 via-purple-50 to-slate-50 text-slate-900'} flex flex-col`}>
       {/* Header */}
-      <header className={`${darkMode ? 'bg-black/30' : 'bg-white/40'} backdrop-blur-lg border-b ${darkMode ? 'border-white/10' : 'border-white/40'} p-4`}>
+      <header className={`${darkMode ? 'bg-black/30' : 'bg-white/40'} backdrop-blur-lg border-b ${darkMode ? 'border-white/10' : 'border-white/40'} p-4 flex-shrink-0 z-40`}>
         <div className="max-w-7xl mx-auto">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-4">
@@ -499,7 +530,7 @@ export default function FlowBoard() {
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
-              className={`${darkMode ? 'bg-white/10 border-white/20 text-white' : 'bg-white/40 border-white/60 text-slate-900'} border rounded px-3 py-2`}
+              className={`bg-purple-600 hover:bg-purple-700 text-white border border-purple-700 rounded px-3 py-2 transition`}
             >
               <option value="">Todos os Status</option>
               <option value="backlog">Backlog</option>
@@ -511,7 +542,7 @@ export default function FlowBoard() {
             <select
               value={filterPriority}
               onChange={(e) => setFilterPriority(e.target.value)}
-              className={`${darkMode ? 'bg-white/10 border-white/20 text-white' : 'bg-white/40 border-white/60 text-slate-900'} border rounded px-3 py-2`}
+              className={`bg-purple-600 hover:bg-purple-700 text-white border border-purple-700 rounded px-3 py-2 transition`}
             >
               <option value="">Todas as Prioridades</option>
               <option value="alta">Alta</option>
@@ -546,7 +577,7 @@ export default function FlowBoard() {
             <select
               value={currentProject}
               onChange={(e) => setCurrentProject(e.target.value)}
-              className={`${darkMode ? 'bg-white/10 border-white/20 text-white' : 'bg-white/40 border-white/60 text-slate-900'} border rounded px-3 py-2`}
+              className={`bg-purple-600 hover:bg-purple-700 text-white border border-purple-700 rounded px-3 py-2 transition`}
             >
               <option value="all">Todos os Projetos</option>
               {projects.map(p => (
@@ -583,28 +614,39 @@ export default function FlowBoard() {
         </div>
       </header>
 
-      {/* Views */}
-      <main className="max-w-7xl mx-auto p-6">
-        {view === 'dashboard' && <DashboardView stats={stats} tasks={filteredTasks} darkMode={darkMode} />}
-        {view === 'kanban' && (
-          <KanbanView 
-            tasks={filteredTasks} 
-            moveTask={moveTask} 
-            updateTask={updateTask}
-            deleteTask={deleteTask}
-            toggleSubtask={toggleSubtask}
-            setEditingTask={setEditingTask}
-            darkMode={darkMode}
-          />
-        )}
-        {view === 'programmer' && (
-          <ProgrammerView 
-            tasks={filteredTasks} 
-            updateTask={updateTask}
-            deleteTask={deleteTask}
-            darkMode={darkMode}
-          />
-        )}
+      {/* Views - Full Screen Card */}
+      <main className="flex-1 flex items-center justify-center p-4 overflow-hidden">
+        <div className={`${darkMode ? 'bg-slate-900 border-white/20' : 'bg-white border-white/40'} border rounded-3xl w-full h-full overflow-hidden flex flex-col shadow-2xl animate-expand-panel`}>
+          {/* Content Area with scroll */}
+          <div className="flex-1 overflow-y-auto overflow-x-hidden p-6">
+            <div className="animate-slide-in-content">
+              {view === 'dashboard' && <DashboardView stats={stats} tasks={filteredTasks} darkMode={darkMode} />}
+              {view === 'kanban' && (
+                <KanbanView 
+                  tasks={filteredTasks} 
+                  moveTask={moveTask} 
+                  updateTask={updateTask}
+                  deleteTask={deleteTask}
+                  toggleSubtask={toggleSubtask}
+                  setEditingTask={setEditingTask}
+                  darkMode={darkMode}
+                  onEditFlow={(task) => {
+                    setShowFlowEditor(true);
+                    setEditingFlowTask(task);
+                  }}
+                />
+              )}
+              {view === 'programmer' && (
+                <ProgrammerView 
+                  tasks={filteredTasks} 
+                  updateTask={updateTask}
+                  deleteTask={deleteTask}
+                  darkMode={darkMode}
+                />
+              )}
+            </div>
+          </div>
+        </div>
       </main>
 
       {/* Modals */}
@@ -634,6 +676,31 @@ export default function FlowBoard() {
           darkMode={darkMode}
         />
       )}
+
+      {showFlowEditor && editingFlowTask && (
+        <FlowEditorModal
+          task={editingFlowTask}
+          onClose={() => {
+            setShowFlowEditor(false);
+            setEditingFlowTask(null);
+          }}
+          onSave={(flowData) => {
+            updateTask({ ...editingFlowTask, flowData });
+            setShowFlowEditor(false);
+            setEditingFlowTask(null);
+          }}
+          darkMode={darkMode}
+        />
+      )}
+
+      {taskToDelete && (
+        <DeleteConfirmModal
+          task={taskToDelete}
+          onConfirm={() => confirmDeleteTask(taskToDelete.id)}
+          onCancel={() => setTaskToDelete(null)}
+          darkMode={darkMode}
+        />
+      )}
     </div>
   );
 }
@@ -647,8 +714,8 @@ function DashboardView({ stats, tasks, darkMode }) {
     .slice(0, 5);
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+    <div className="space-y-6 max-w-6xl mx-auto w-full">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         <StatCard title="Total" value={stats.total} color="purple" darkMode={darkMode} />
         <StatCard title="Backlog" value={stats.backlog} color="gray" darkMode={darkMode} />
         <StatCard title="Em Progresso" value={stats.progress} color="blue" darkMode={darkMode} />
@@ -714,7 +781,7 @@ function StatCard({ title, value, color, darkMode }) {
 }
 
 // Kanban View
-function KanbanView({ tasks, moveTask, updateTask, deleteTask, toggleSubtask, setEditingTask, darkMode }) {
+function KanbanView({ tasks, moveTask, updateTask, deleteTask, toggleSubtask, setEditingTask, darkMode, onEditFlow }) {
   const columns = [
     { id: 'backlog', title: 'Backlog', color: 'gray' },
     { id: 'progress', title: 'Em Progresso', color: 'blue' },
@@ -723,25 +790,28 @@ function KanbanView({ tasks, moveTask, updateTask, deleteTask, toggleSubtask, se
   ];
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-      {columns.map(column => (
-        <KanbanColumn
-          key={column.id}
-          column={column}
-          tasks={tasks.filter(t => t.status === column.id)}
-          moveTask={moveTask}
-          updateTask={updateTask}
-          deleteTask={deleteTask}
-          toggleSubtask={toggleSubtask}
-          setEditingTask={setEditingTask}
-          darkMode={darkMode}
-        />
-      ))}
+    <div className="w-full h-full">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 auto-rows-max">
+        {columns.map(column => (
+          <KanbanColumn
+            key={column.id}
+            column={column}
+            tasks={tasks.filter(t => t.status === column.id)}
+            moveTask={moveTask}
+            updateTask={updateTask}
+            deleteTask={deleteTask}
+            toggleSubtask={toggleSubtask}
+            setEditingTask={setEditingTask}
+            darkMode={darkMode}
+            onEditFlow={onEditFlow}
+          />
+        ))}
+      </div>
     </div>
   );
 }
 
-function KanbanColumn({ column, tasks, moveTask, updateTask, deleteTask, toggleSubtask, setEditingTask, darkMode }) {
+function KanbanColumn({ column, tasks, moveTask, updateTask, deleteTask, toggleSubtask, setEditingTask, darkMode, onEditFlow }) {
   const [draggedOver, setDraggedOver] = useState(false);
 
   return (
@@ -776,6 +846,7 @@ function KanbanColumn({ column, tasks, moveTask, updateTask, deleteTask, toggleS
             toggleSubtask={toggleSubtask}
             setEditingTask={setEditingTask}
             darkMode={darkMode}
+            onEditFlow={onEditFlow}
           />
         ))}
       </div>
@@ -783,11 +854,10 @@ function KanbanColumn({ column, tasks, moveTask, updateTask, deleteTask, toggleS
   );
 }
 
-function TaskCard({ task, updateTask, deleteTask, toggleSubtask, setEditingTask, darkMode }) {
+function TaskCard({ task, updateTask, deleteTask, toggleSubtask, setEditingTask, darkMode, onEditFlow }) {
   const [expanded, setExpanded] = useState(false);
   const [showSubtaskInput, setShowSubtaskInput] = useState(false);
   const [newSubtask, setNewSubtask] = useState('');
-  const [showFlowEditor, setShowFlowEditor] = useState(false);
 
   const completedSubtasks = task.subtasks?.filter(st => st.completed).length || 0;
   const totalSubtasks = task.subtasks?.length || 0;
@@ -824,7 +894,7 @@ function TaskCard({ task, updateTask, deleteTask, toggleSubtask, setEditingTask,
           </div>
           <div className="flex gap-1">
             <button
-              onClick={() => setShowFlowEditor(true)}
+              onClick={() => onEditFlow(task)}
               className={`p-1 ${darkMode ? 'hover:bg-white/10' : 'hover:bg-white/30'} rounded`}
               title="Editor de Fluxograma"
             >
@@ -932,18 +1002,6 @@ function TaskCard({ task, updateTask, deleteTask, toggleSubtask, setEditingTask,
           </div>
         )}
       </div>
-
-      {showFlowEditor && (
-        <FlowEditorModal
-          task={task}
-          onClose={() => setShowFlowEditor(false)}
-          onSave={(flowData) => {
-            updateTask({ ...task, flowData });
-            setShowFlowEditor(false);
-          }}
-          darkMode={darkMode}
-        />
-      )}
     </>
   );
 }
@@ -955,7 +1013,7 @@ function ProgrammerView({ tasks, updateTask, deleteTask, darkMode }) {
     .sort((a, b) => calculateImpact(b) - calculateImpact(a));
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 max-w-5xl mx-auto w-full">
       <div className={`${darkMode ? 'bg-white/10 border-white/20' : 'bg-white/40 border-white/40'} backdrop-blur-lg rounded-xl p-4 border`}>
         <h3 className="text-lg font-bold mb-2">Atalhos</h3>
         <p className={`text-sm ${darkMode ? 'text-white/70' : 'text-slate-700'}`}>
@@ -1027,19 +1085,29 @@ function TaskModal({ task, onClose, onSave, projects, darkMode }) {
 
   return (
     <div className={`fixed inset-0 ${darkMode ? 'bg-black/50' : 'bg-black/30'} backdrop-blur-sm flex items-center justify-center p-4 z-50`}>
-      <div className={`${darkMode ? 'bg-slate-900 border-white/20' : 'bg-slate-100 border-white/60'} border rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto`}>
-        <h2 className="text-2xl font-bold mb-4">
-          {task ? 'Editar Task' : 'Nova Task'}
-        </h2>
+      <div className={`${darkMode ? 'bg-slate-900 border-white/20' : 'bg-slate-100 border-white/60'} border rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col`}>
+        {/* Header com título */}
+        <div className={`${darkMode ? 'bg-gradient-to-r from-purple-900 to-pink-900 border-b border-white/10' : 'bg-gradient-to-r from-purple-500 to-pink-500 border-b border-white/40'} px-6 py-4 flex items-center justify-between`}>
+          <h2 className="text-2xl font-bold text-white">
+            {task ? '✏️ Editar Task' : '➕ Nova Task'}
+          </h2>
+          <button
+            onClick={onClose}
+            className="text-white hover:bg-white/20 p-2 rounded-lg transition"
+          >
+            <X className="w-6 h-6" />
+          </button>
+        </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        {/* Conteúdo com scroll */}
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-4">
           <div>
             <label className="block text-sm font-medium mb-2">Título *</label>
             <input
               type="text"
               value={formData.title}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              className={`w-full ${darkMode ? 'bg-white/10 border-white/20 text-white placeholder-white/50' : 'bg-white border-slate-300 text-slate-900 placeholder-slate-600'} border rounded-lg px-4 py-2`}
+              className={`w-full ${darkMode ? 'bg-white/10 border-white/20 text-white placeholder-white/50' : 'bg-white border-slate-300 text-slate-900 placeholder-slate-600'} border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500`}
               placeholder="Digite o título da task"
               required
             />
@@ -1050,7 +1118,7 @@ function TaskModal({ task, onClose, onSave, projects, darkMode }) {
             <textarea
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              className={`w-full h-24 ${darkMode ? 'bg-white/10 border-white/20 text-white placeholder-white/50' : 'bg-white border-slate-300 text-slate-900 placeholder-slate-600'} border rounded-lg px-4 py-2`}
+              className={`w-full h-24 ${darkMode ? 'bg-white/10 border-white/20 text-white placeholder-white/50' : 'bg-white border-slate-300 text-slate-900 placeholder-slate-600'} border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500`}
               placeholder="Digite a descrição da task"
             />
           </div>
@@ -1077,7 +1145,7 @@ function TaskModal({ task, onClose, onSave, projects, darkMode }) {
                 step="0.5"
                 value={formData.effort}
                 onChange={(e) => setFormData({ ...formData, effort: parseFloat(e.target.value) })}
-                className={`w-full ${darkMode ? 'bg-white/10 border-white/20 text-white' : 'bg-white border-slate-300 text-slate-900'} border rounded-lg px-4 py-2`}
+                className={`w-full ${darkMode ? 'bg-white/10 border-white/20 text-white' : 'bg-white border-slate-300 text-slate-900'} border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500`}
               />
             </div>
           </div>
@@ -1089,7 +1157,7 @@ function TaskModal({ task, onClose, onSave, projects, darkMode }) {
                 type="date"
                 value={formData.dueDate}
                 onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
-                className={`w-full ${darkMode ? 'bg-white/10 border-white/20 text-white' : 'bg-white border-slate-300 text-slate-900'} border rounded-lg px-4 py-2`}
+                className={`w-full ${darkMode ? 'bg-white/10 border-white/20 text-white' : 'bg-white border-slate-300 text-slate-900'} border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500`}
               />
             </div>
 
@@ -1099,7 +1167,7 @@ function TaskModal({ task, onClose, onSave, projects, darkMode }) {
                 type="text"
                 value={formData.tag}
                 onChange={(e) => setFormData({ ...formData, tag: e.target.value })}
-                className={`w-full ${darkMode ? 'bg-white/10 border-white/20 text-white placeholder-white/50' : 'bg-white border-slate-300 text-slate-900 placeholder-slate-600'} border rounded-lg px-4 py-2`}
+                className={`w-full ${darkMode ? 'bg-white/10 border-white/20 text-white placeholder-white/50' : 'bg-white border-slate-300 text-slate-900 placeholder-slate-600'} border rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500`}
                 placeholder="ex: frontend, backend"
               />
             </div>
@@ -1111,7 +1179,7 @@ function TaskModal({ task, onClose, onSave, projects, darkMode }) {
               <select
                 value={formData.projectId}
                 onChange={(e) => setFormData({ ...formData, projectId: e.target.value })}
-                className={`w-full ${darkMode ? 'bg-white/10 border-white/20 text-white' : 'bg-white border-slate-300 text-slate-900'} border rounded-lg px-4 py-2`}
+                className={`w-full bg-purple-600 hover:bg-purple-700 text-white border border-purple-700 rounded-lg px-4 py-2 transition focus:outline-none focus:ring-2 focus:ring-purple-500`}
               >
                 {projects.map(p => (
                   <option key={p.id} value={p.id}>{p.name}</option>
@@ -1124,7 +1192,7 @@ function TaskModal({ task, onClose, onSave, projects, darkMode }) {
               <select
                 value={formData.status}
                 onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                className={`w-full ${darkMode ? 'bg-white/10 border-white/20 text-white' : 'bg-white border-slate-300 text-slate-900'} border rounded-lg px-4 py-2`}
+                className={`w-full bg-purple-600 hover:bg-purple-700 text-white border border-purple-700 rounded-lg px-4 py-2 transition focus:outline-none focus:ring-2 focus:ring-purple-500`}
               >
                 <option value="backlog">Backlog</option>
                 <option value="progress">Em Progresso</option>
@@ -1133,200 +1201,19 @@ function TaskModal({ task, onClose, onSave, projects, darkMode }) {
               </select>
             </div>
           </div>
-
-          <div className={`flex gap-4 pt-4 border-t ${darkMode ? 'border-white/10' : 'border-slate-300'}`}>
-            <button
-              type="submit"
-              className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 rounded-lg py-2 font-semibold transition text-white"
-            >
-              {task ? 'Atualizar' : 'Criar'} Task
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className={`flex-1 ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-slate-300 hover:bg-slate-400'} rounded-lg py-2 font-semibold transition`}
-            >
-              Cancelar
-            </button>
-          </div>
         </form>
-      </div>
-    </div>
-  );
-}
 
-// Flow Editor Modal
-function FlowEditorModal({ task, onClose, onSave, darkMode }) {
-  const [nodes, setNodes] = useState(task.flowData?.nodes || [
-    { id: '1', label: 'Início', x: 100, y: 100 }
-  ]);
-  const [connections, setConnections] = useState(task.flowData?.connections || []);
-  const [selectedNode, setSelectedNode] = useState(null);
-  const [draggingNode, setDraggingNode] = useState(null);
-  const canvasRef = useRef(null);
-
-  const addNode = () => {
-    const newNode = {
-      id: Date.now().toString(),
-      label: `Nó ${nodes.length + 1}`,
-      x: Math.random() * 400 + 50,
-      y: Math.random() * 300 + 50
-    };
-    setNodes([...nodes, newNode]);
-  };
-
-  const deleteNode = (id) => {
-    setNodes(nodes.filter(n => n.id !== id));
-    setConnections(connections.filter(c => c.from !== id && c.to !== id));
-  };
-
-  const connectNodes = (fromId, toId) => {
-    if (fromId !== toId && !connections.find(c => c.from === fromId && c.to === toId)) {
-      setConnections([...connections, { from: fromId, to: toId }]);
-    }
-  };
-
-  const handleNodeDragStart = (e, nodeId) => {
-    setDraggingNode(nodeId);
-  };
-
-  const handleNodeDragMove = (e) => {
-    if (!draggingNode || !canvasRef.current) return;
-    const rect = canvasRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    setNodes(nodes.map(n => n.id === draggingNode ? { ...n, x, y } : n));
-  };
-
-  const handleNodeDragEnd = () => {
-    setDraggingNode(null);
-  };
-
-  return (
-    <div className={`fixed inset-0 ${darkMode ? 'bg-black/50' : 'bg-black/30'} backdrop-blur-sm flex items-center justify-center p-4 z-50`}>
-      <div className={`${darkMode ? 'bg-slate-900 border-white/20' : 'bg-slate-100 border-white/60'} border rounded-2xl p-6 max-w-4xl w-full max-h-[90vh] overflow-y-auto`}>
-        <h2 className="text-2xl font-bold mb-4">📊 Editor de Fluxograma - {task.title}</h2>
-        
-        <div className="flex gap-4">
-          <div className="flex-1">
-            <div className={`${darkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-300'} border rounded-lg p-4 mb-4 relative`} style={{ minHeight: '400px' }}>
-              <svg
-                ref={canvasRef}
-                className="w-full h-full absolute inset-0"
-                onMouseMove={handleNodeDragMove}
-                onMouseUp={handleNodeDragEnd}
-                onMouseLeave={handleNodeDragEnd}
-              >
-                {connections.map((conn, idx) => {
-                  const fromNode = nodes.find(n => n.id === conn.from);
-                  const toNode = nodes.find(n => n.id === conn.to);
-                  if (!fromNode || !toNode) return null;
-                  return (
-                    <line
-                      key={idx}
-                      x1={fromNode.x + 40}
-                      y1={fromNode.y + 20}
-                      x2={toNode.x + 40}
-                      y2={toNode.y + 20}
-                      stroke={darkMode ? '#a78bfa' : '#9333ea'}
-                      strokeWidth="2"
-                      markerEnd="url(#arrowhead)"
-                    />
-                  );
-                })}
-                <defs>
-                  <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
-                    <polygon points="0 0, 10 3, 0 6" fill={darkMode ? '#a78bfa' : '#9333ea'} />
-                  </marker>
-                </defs>
-              </svg>
-
-              <div className="relative z-10 p-4">
-                {nodes.map(node => (
-                  <div
-                    key={node.id}
-                    draggable
-                    onDragStart={(e) => handleNodeDragStart(e, node.id)}
-                    onClick={() => setSelectedNode(node.id)}
-                    className={`absolute w-24 h-12 rounded-lg flex items-center justify-center cursor-move text-sm font-semibold transition ${
-                      selectedNode === node.id
-                        ? `${darkMode ? 'bg-purple-600 border-white' : 'bg-purple-500 border-purple-700'}`
-                        : `${darkMode ? 'bg-purple-800/50 border-purple-400' : 'bg-purple-300/50 border-purple-600'}`
-                    } border-2 text-center`}
-                    style={{ left: `${node.x}px`, top: `${node.y}px`, cursor: 'grab' }}
-                  >
-                    {node.label}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex gap-2 flex-wrap">
-              <button
-                onClick={addNode}
-                className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-white text-sm font-semibold"
-              >
-                + Adicionar Nó
-              </button>
-              {selectedNode && (
-                <>
-                  <button
-                    onClick={() => deleteNode(selectedNode)}
-                    className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded text-white text-sm font-semibold"
-                  >
-                    🗑️ Deletar Nó
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (selectedNode) {
-                        const otherNodes = nodes.filter(n => n.id !== selectedNode);
-                        if (otherNodes.length > 0) {
-                          connectNodes(selectedNode, otherNodes[0].id);
-                        }
-                      }
-                    }}
-                    className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-white text-sm font-semibold"
-                  >
-                    🔗 Conectar
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-
-          <div className="w-64">
-            <h3 className="font-bold mb-3">Nós ({nodes.length})</h3>
-            <div className={`${darkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-300'} border rounded p-3 space-y-2 max-h-96 overflow-y-auto`}>
-              {nodes.map(node => (
-                <div
-                  key={node.id}
-                  onClick={() => setSelectedNode(node.id)}
-                  className={`p-2 rounded cursor-pointer text-sm ${selectedNode === node.id ? (darkMode ? 'bg-purple-600' : 'bg-purple-500') : (darkMode ? 'bg-white/10' : 'bg-slate-200')}`}
-                >
-                  {node.label}
-                </div>
-              ))}
-            </div>
-
-            <h3 className="font-bold mb-3 mt-4">Conexões ({connections.length})</h3>
-            <div className={`${darkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-300'} border rounded p-3 space-y-2 max-h-40 overflow-y-auto text-xs`}>
-              {connections.map((conn, idx) => (
-                <div key={idx} className={darkMode ? 'bg-white/10' : 'bg-slate-200'} style={{ padding: '4px', borderRadius: '4px' }}>
-                  {nodes.find(n => n.id === conn.from)?.label} → {nodes.find(n => n.id === conn.to)?.label}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className={`flex gap-4 pt-4 mt-4 border-t ${darkMode ? 'border-white/10' : 'border-slate-300'}`}>
+        {/* Footer com botões */}
+        <div className={`border-t ${darkMode ? 'border-white/10 bg-white/5' : 'border-slate-300 bg-slate-50'} px-6 py-4 flex gap-4`}>
           <button
-            onClick={() => onSave({ nodes, connections })}
+            type="submit"
+            onClick={handleSubmit}
             className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 rounded-lg py-2 font-semibold transition text-white"
           >
-            💾 Salvar Fluxograma
+            {task ? 'Atualizar' : 'Criar'} Task
           </button>
           <button
+            type="button"
             onClick={onClose}
             className={`flex-1 ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-slate-300 hover:bg-slate-400'} rounded-lg py-2 font-semibold transition`}
           >
@@ -1338,38 +1225,367 @@ function FlowEditorModal({ task, onClose, onSave, darkMode }) {
   );
 }
 
+// Flow Editor Modal
+function FlowEditorModal({ task, onClose, onSave, darkMode }) {
+  const [nodes, setNodes] = useState(task.flowData?.nodes || [
+    { id: '1', label: 'Início' },
+    { id: '2', label: 'Etapa 1' }
+  ]);
+  const [connections, setConnections] = useState(task.flowData?.connections || [
+    { from: '1', to: '2' }
+  ]);
+  const [selectedNode, setSelectedNode] = useState(null);
+  const [editingNodeId, setEditingNodeId] = useState(null);
+  const [editingLabel, setEditingLabel] = useState('');
+
+  const addNode = () => {
+    const lastNode = nodes[nodes.length - 1];
+    const newNode = {
+      id: Date.now().toString(),
+      label: `Etapa ${nodes.length}`
+    };
+    const newNodes = [...nodes, newNode];
+    const newConnections = [...connections, { from: lastNode.id, to: newNode.id }];
+    setNodes(newNodes);
+    setConnections(newConnections);
+    setSelectedNode(newNode.id);
+  };
+
+  const deleteNode = (id) => {
+    if (id === '1') return; // Não permite deletar Início
+    const newNodes = nodes.filter(n => n.id !== id);
+    const newConnections = connections.filter(c => c.from !== id && c.to !== id);
+    setNodes(newNodes);
+    setConnections(newConnections);
+    setSelectedNode(null);
+  };
+
+  const startEditingNode = (node) => {
+    setEditingNodeId(node.id);
+    setEditingLabel(node.label);
+  };
+
+  const saveNodeLabel = () => {
+    if (editingLabel.trim()) {
+      setNodes(nodes.map(n => n.id === editingNodeId ? { ...n, label: editingLabel } : n));
+    }
+    setEditingNodeId(null);
+    setEditingLabel('');
+  };
+
+  const moveNode = (id, direction) => {
+    const currentIndex = nodes.findIndex(n => n.id === id);
+    if (direction === 'up' && currentIndex > 1) {
+      const newNodes = [...nodes];
+      [newNodes[currentIndex], newNodes[currentIndex - 1]] = [newNodes[currentIndex - 1], newNodes[currentIndex]];
+      setNodes(newNodes);
+    } else if (direction === 'down' && currentIndex < nodes.length - 1) {
+      const newNodes = [...nodes];
+      [newNodes[currentIndex], newNodes[currentIndex + 1]] = [newNodes[currentIndex + 1], newNodes[currentIndex]];
+      setNodes(newNodes);
+    }
+  };
+
+  // Calcular posições em linha
+  const nodeWidth = 180;
+  const nodeHeight = 80;
+  const horizontalSpacing = 220;
+  const verticalCenter = 150;
+
+  return (
+    <div className={`fixed inset-0 ${darkMode ? 'bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900' : 'bg-gradient-to-br from-slate-50 via-purple-50 to-slate-50'} flex flex-col z-50`}>
+      {/* Header */}
+      <div className={`${darkMode ? 'bg-black/30' : 'bg-white/40'} backdrop-blur-lg border-b ${darkMode ? 'border-white/10' : 'border-white/40'} px-6 py-4 flex items-center justify-between flex-shrink-0`}>
+        <h2 className="text-3xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
+          📊 Fluxograma: {task.title}
+        </h2>
+        <button
+          onClick={onClose}
+          className={`p-2 rounded-lg transition ${darkMode ? 'hover:bg-white/20' : 'hover:bg-white/40'}`}
+        >
+          <X className="w-6 h-6" />
+        </button>
+      </div>
+
+      {/* Content Area */}
+      <div className="flex-1 overflow-hidden flex">
+        {/* Canvas */}
+        <div className="flex-1 overflow-auto relative p-8">
+          {/* SVG para conexões */}
+          <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ background: 'transparent' }}>
+            {connections.map((conn, idx) => {
+              const fromIndex = nodes.findIndex(n => n.id === conn.from);
+              const toIndex = nodes.findIndex(n => n.id === conn.to);
+              if (fromIndex === -1 || toIndex === -1) return null;
+
+              const x1 = 32 + fromIndex * horizontalSpacing + nodeWidth / 2;
+              const y1 = verticalCenter + nodeHeight / 2;
+              const x2 = 32 + toIndex * horizontalSpacing + nodeWidth / 2;
+              const y2 = verticalCenter + nodeHeight / 2;
+
+              return (
+                <g key={idx}>
+                  <line
+                    x1={x1}
+                    y1={y1}
+                    x2={x2}
+                    y2={y2}
+                    stroke={darkMode ? '#a78bfa' : '#9333ea'}
+                    strokeWidth="3"
+                    markerEnd="url(#arrowhead)"
+                  />
+                </g>
+              );
+            })}
+            <defs>
+              <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                <polygon points="0 0, 10 3, 0 6" fill={darkMode ? '#a78bfa' : '#9333ea'} />
+              </marker>
+            </defs>
+          </svg>
+
+          {/* Nós */}
+          <div className="relative" style={{ minHeight: '400px', minWidth: `${nodes.length * horizontalSpacing + 100}px` }}>
+            {nodes.map((node, index) => (
+              <div
+                key={node.id}
+                onClick={() => setSelectedNode(node.id)}
+                className={`absolute rounded-xl transition cursor-pointer flex items-center justify-center border-2 ${
+                  selectedNode === node.id
+                    ? `${darkMode ? 'border-purple-400 bg-purple-600/80' : 'border-purple-500 bg-purple-500/80'} shadow-lg`
+                    : `${darkMode ? 'border-purple-500 bg-purple-900/60 hover:bg-purple-800/80' : 'border-purple-400 bg-purple-400/60 hover:bg-purple-500/70'}`
+                }`}
+                style={{
+                  left: `${32 + index * horizontalSpacing}px`,
+                  top: `${verticalCenter}px`,
+                  width: `${nodeWidth}px`,
+                  height: `${nodeHeight}px`,
+                  zIndex: selectedNode === node.id ? 10 : 1
+                }}
+              >
+                {editingNodeId === node.id ? (
+                  <div className="flex items-center gap-2 w-full px-3">
+                    <input
+                      type="text"
+                      value={editingLabel}
+                      onChange={(e) => setEditingLabel(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && saveNodeLabel()}
+                      className={`flex-1 px-2 py-1 rounded text-sm font-semibold ${darkMode ? 'bg-white/20 text-white' : 'bg-white/60 text-slate-900'}`}
+                      autoFocus
+                    />
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        saveNodeLabel();
+                      }}
+                      className="text-green-400 hover:text-green-300"
+                    >
+                      ✓
+                    </button>
+                  </div>
+                ) : (
+                  <div
+                    className="text-center text-white font-semibold text-sm px-2 w-full cursor-default hover:underline"
+                    onDoubleClick={() => startEditingNode(node)}
+                  >
+                    {node.label}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Sidebar */}
+        <div className={`${darkMode ? 'bg-white/5 border-l border-white/10' : 'bg-white/30 border-l border-white/40'} w-80 p-6 overflow-y-auto flex flex-col gap-6`}>
+          {/* Controles */}
+          <div>
+            <h3 className="text-lg font-bold mb-4">⚙️ Controles</h3>
+            <button
+              onClick={addNode}
+              className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 rounded-lg transition mb-3"
+            >
+              + Adicionar Etapa
+            </button>
+            {selectedNode && selectedNode !== '1' && (
+              <button
+                onClick={() => deleteNode(selectedNode)}
+                className="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-2 rounded-lg transition"
+              >
+                🗑️ Deletar Etapa
+              </button>
+            )}
+          </div>
+
+          {/* Lista de Nós */}
+          <div>
+            <h3 className="text-lg font-bold mb-4">📋 Etapas ({nodes.length})</h3>
+            <div className={`space-y-2 ${darkMode ? 'bg-white/10' : 'bg-white/40'} rounded-lg p-3`}>
+              {nodes.map((node, index) => (
+                <div
+                  key={node.id}
+                  onClick={() => setSelectedNode(node.id)}
+                  className={`p-3 rounded-lg cursor-pointer transition ${
+                    selectedNode === node.id
+                      ? `${darkMode ? 'bg-purple-600 shadow-lg' : 'bg-purple-500 shadow-lg'}`
+                      : `${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/40 hover:bg-white/60'}`
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-sm flex-1">{index + 1}. {node.label}</span>
+                    {index > 0 && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          moveNode(node.id, 'up');
+                        }}
+                        className="text-xs p-1 hover:bg-white/20 rounded"
+                        title="Mover para cima"
+                      >
+                        ↑
+                      </button>
+                    )}
+                    {index < nodes.length - 1 && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          moveNode(node.id, 'down');
+                        }}
+                        className="text-xs p-1 hover:bg-white/20 rounded"
+                        title="Mover para baixo"
+                      >
+                        ↓
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Instruções */}
+          <div className={`text-xs ${darkMode ? 'text-white/60' : 'text-slate-700'} space-y-2`}>
+            <p><strong>💡 Dicas:</strong></p>
+            <p>• Clique duplo no bloco para editar o nome</p>
+            <p>• Use os botões ↑↓ para reordenar etapas</p>
+            <p>• Adicione novas etapas sequencialmente</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className={`${darkMode ? 'bg-black/30 border-t border-white/10' : 'bg-white/40 border-t border-white/40'} backdrop-blur-lg px-6 py-4 flex gap-4 flex-shrink-0`}>
+        <button
+          onClick={() => onSave({ nodes, connections })}
+          className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold py-3 rounded-lg transition shadow-lg"
+        >
+          💾 Salvar Fluxograma
+        </button>
+        <button
+          onClick={onClose}
+          className={`flex-1 ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/40 hover:bg-white/60'} text-white font-bold py-3 rounded-lg transition`}
+        >
+          ✕ Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Template Modal
 // Template Modal
 function TemplateModal({ onClose, onSelectTemplate, darkMode }) {
   return (
     <div className={`fixed inset-0 ${darkMode ? 'bg-black/50' : 'bg-black/30'} backdrop-blur-sm flex items-center justify-center p-4 z-50`}>
-      <div className={`${darkMode ? 'bg-slate-900 border-white/20' : 'bg-slate-100 border-white/60'} border rounded-2xl p-6 max-w-3xl w-full`}>
-        <h2 className="text-2xl font-bold mb-6">📋 Selecione um Template</h2>
-        
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-          {PROJECT_TEMPLATES.map((template, idx) => (
-            <div
-              key={idx}
-              onClick={() => onSelectTemplate(template.tasks, template.name)}
-              className={`${darkMode ? 'bg-white/10 border-white/20 hover:bg-white/20 cursor-pointer' : 'bg-white border-slate-300 hover:bg-slate-50 cursor-pointer'} border rounded-xl p-6 transition`}
-            >
-              <div className="text-4xl mb-2">{template.icon}</div>
-              <h3 className="font-bold text-lg mb-2">{template.name}</h3>
-              <p className={`text-sm ${darkMode ? 'text-white/70' : 'text-slate-700'} mb-3`}>
-                {template.description}
-              </p>
-              <button className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 rounded font-semibold transition">
-                Usar Template
-              </button>
-            </div>
-          ))}
+      <div className={`${darkMode ? 'bg-slate-900 border-white/20' : 'bg-slate-100 border-white/60'} border rounded-2xl w-full max-w-3xl overflow-hidden flex flex-col`}>
+        {/* Header */}
+        <div className={`${darkMode ? 'bg-gradient-to-r from-purple-900 to-pink-900 border-b border-white/10' : 'bg-gradient-to-r from-purple-500 to-pink-500 border-b border-white/40'} px-6 py-4 flex items-center justify-between`}>
+          <h2 className="text-2xl font-bold text-white">📋 Selecione um Template</h2>
+          <button
+            onClick={onClose}
+            className="text-white hover:bg-white/20 p-2 rounded-lg transition"
+          >
+            <X className="w-6 h-6" />
+          </button>
         </div>
 
-        <button
-          onClick={onClose}
-          className={`w-full ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-slate-300 hover:bg-slate-400'} rounded-lg py-2 font-semibold transition`}
-        >
-          Cancelar
-        </button>
+        {/* Conteúdo */}
+        <div className="p-6 overflow-y-auto">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            {PROJECT_TEMPLATES.map((template, idx) => (
+              <div
+                key={idx}
+                onClick={() => onSelectTemplate(template.tasks, template.name)}
+                className={`${darkMode ? 'bg-white/10 border-white/20 hover:bg-white/20 cursor-pointer' : 'bg-white border-slate-300 hover:bg-slate-50 cursor-pointer'} border rounded-xl p-6 transition`}
+              >
+                <div className="text-4xl mb-2">{template.icon}</div>
+                <h3 className="font-bold text-lg mb-2">{template.name}</h3>
+                <p className={`text-sm ${darkMode ? 'text-white/70' : 'text-slate-700'} mb-3`}>
+                  {template.description}
+                </p>
+                <button className="w-full bg-purple-600 hover:bg-purple-700 text-white py-2 rounded font-semibold transition">
+                  Usar Template
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className={`border-t ${darkMode ? 'border-white/10 bg-white/5' : 'border-slate-300 bg-slate-50'} px-6 py-4`}>
+          <button
+            onClick={onClose}
+            className={`w-full ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-slate-300 hover:bg-slate-400'} rounded-lg py-2 font-semibold transition`}
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Delete Confirmation Modal
+function DeleteConfirmModal({ task, onConfirm, onCancel, darkMode }) {
+  return (
+    <div className={`fixed inset-0 ${darkMode ? 'bg-black/50' : 'bg-black/30'} backdrop-blur-sm flex items-center justify-center p-4 z-50`}>
+      <div className={`${darkMode ? 'bg-slate-800 border-white/20' : 'bg-white border-slate-200'} rounded-2xl border p-6 max-w-sm w-full shadow-2xl`}>
+        <div className="flex items-center gap-3 mb-4">
+          <div className="bg-red-500/20 p-3 rounded-full">
+            <AlertTriangle className="w-6 h-6 text-red-500" />
+          </div>
+          <h2 className="text-xl font-bold">Deletar Tarefa?</h2>
+        </div>
+        
+        <p className={`${darkMode ? 'text-white/70' : 'text-slate-700'} mb-2`}>
+          Tem certeza que deseja deletar a tarefa:
+        </p>
+        
+        <div className={`${darkMode ? 'bg-white/10' : 'bg-slate-100'} rounded-lg p-3 mb-6 border ${darkMode ? 'border-white/20' : 'border-slate-200'}`}>
+          <p className="font-semibold">{task.title}</p>
+          {task.description && (
+            <p className={`text-sm ${darkMode ? 'text-white/60' : 'text-slate-600'} mt-1`}>{task.description}</p>
+          )}
+        </div>
+        
+        <p className={`text-sm ${darkMode ? 'text-red-400/80' : 'text-red-600'} mb-6 font-semibold`}>
+          ⚠️ Esta ação é irreversível!
+        </p>
+        
+        <div className="flex gap-3">
+          <button
+            onClick={onCancel}
+            className={`flex-1 ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-slate-200 hover:bg-slate-300'} rounded-lg py-2 font-semibold transition`}
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={onConfirm}
+            className="flex-1 bg-red-600 hover:bg-red-700 text-white rounded-lg py-2 font-semibold transition"
+          >
+            Deletar
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -2,6 +2,75 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes expandPanel {
+  from {
+    transform: scale(0.95) translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideInContent {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeInBg {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-expand-panel {
+  animation: expandPanel 0.5s ease-out forwards;
+}
+
+.animate-slide-in-content {
+  animation: slideInContent 0.6s ease-out forwards;
+}
+
+.animate-fade-in-bg {
+  animation: fadeInBg 0.3s ease-out forwards;
+}
+
+/* Select e Option styling */
+select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%239333ea' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 28px;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+}
+
+select option {
+  background-color: #9333ea;
+  color: white;
+  padding: 8px;
+}
+
+select option:hover {
+  background: linear-gradient(#a855f7, #a855f7);
+}
+
+select option:checked {
+  background: linear-gradient(#7e22ce, #7e22ce);
+  color: white;
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
