@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit2, Calendar, Zap, BarChart3, CheckCircle2, Circle, ChevronDown, ChevronUp, Download, Upload, GitBranch, Sun, Moon, Search, X, AlertTriangle, Bell, Filter } from 'lucide-react';
+import { Plus, Trash2, Edit2, Calendar, Zap, BarChart3, CheckCircle2, Circle, ChevronDown, ChevronUp, Download, Upload, GitBranch, Sun, Moon, Search, X, AlertTriangle, Bell, Filter, Lightbulb } from 'lucide-react';
+import BrainstormView from './components/BrainstormView';
 
 // IndexedDB Manager
 const DB_NAME = 'FlowBoardDB';
@@ -209,7 +210,7 @@ export default function FlowBoard() {
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState([]);
   const [currentProject, setCurrentProject] = useState('all');
-  const [view, setView] = useState('kanban'); // kanban, dashboard, programmer
+  const [view, setView] = useState('kanban'); // kanban, dashboard, programmer, brainstorm
   const [showNewTask, setShowNewTask] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [dbReady, setDbReady] = useState(false);
@@ -482,6 +483,13 @@ export default function FlowBoard() {
                 >
                   Programador
                 </button>
+                <button
+                  onClick={() => setView('brainstorm')}
+                  className={`px-4 py-2 rounded-lg transition ${view === 'brainstorm' ? (darkMode ? 'bg-purple-600' : 'bg-purple-500') : (darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/30 hover:bg-white/40')}`}
+                >
+                  <Lightbulb className="w-5 h-5 inline mr-1" />
+                  Brainstorm
+                </button>
               </div>
               
               {/* Menu Mobile */}
@@ -523,6 +531,15 @@ export default function FlowBoard() {
                       className={`w-full text-left px-4 py-3 transition ${darkMode ? 'hover:bg-white/10' : 'hover:bg-slate-100'} ${view === 'programmer' ? (darkMode ? 'bg-purple-600/30' : 'bg-purple-100') : ''}`}
                     >
                       👨‍💻 Programador
+                    </button>
+                    <button
+                      onClick={() => {
+                        setView('brainstorm');
+                        setShowMobileMenu(false);
+                      }}
+                      className={`w-full text-left px-4 py-3 transition ${darkMode ? 'hover:bg-white/10' : 'hover:bg-slate-100'} ${view === 'brainstorm' ? (darkMode ? 'bg-purple-600/30' : 'bg-purple-100') : ''}`}
+                    >
+                      💡 Brainstorm
                     </button>
                   </div>
                 )}
@@ -714,6 +731,16 @@ export default function FlowBoard() {
                   updateTask={updateTask}
                   deleteTask={deleteTask}
                   darkMode={darkMode}
+                />
+              )}
+              {view === 'brainstorm' && (
+                <BrainstormView 
+                  onCreateTask={(taskData) => {
+                    addTask({
+                      ...taskData,
+                      status: 'backlog'
+                    });
+                  }}
                 />
               )}
             </div>
@@ -1299,10 +1326,15 @@ function TaskModal({ task, onClose, onSave, projects, darkMode }) {
 }
 
 // Flow Editor Modal
+// FlowEditorModal - Centro Operacional do Projeto
 function FlowEditorModal({ task, onClose, onSave, darkMode }) {
+  const [projectTitle, setProjectTitle] = useState(task.title);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [projectStatus, setProjectStatus] = useState(task.flowData?.status || 'planejamento');
+  
   const [nodes, setNodes] = useState(task.flowData?.nodes || [
-    { id: '1', label: 'Início' },
-    { id: '2', label: 'Etapa 1' }
+    { id: '1', label: 'Início', status: 'todo' },
+    { id: '2', label: 'Etapa 1', status: 'todo' }
   ]);
   const [connections, setConnections] = useState(task.flowData?.connections || [
     { from: '1', to: '2' }
@@ -1311,11 +1343,14 @@ function FlowEditorModal({ task, onClose, onSave, darkMode }) {
   const [editingNodeId, setEditingNodeId] = useState(null);
   const [editingLabel, setEditingLabel] = useState('');
 
+  const currentNode = nodes.find(n => n.id === selectedNode);
+
   const addNode = () => {
     const lastNode = nodes[nodes.length - 1];
     const newNode = {
       id: Date.now().toString(),
-      label: `Etapa ${nodes.length}`
+      label: `Etapa ${nodes.length}`,
+      status: 'todo'
     };
     const newNodes = [...nodes, newNode];
     const newConnections = [...connections, { from: lastNode.id, to: newNode.id }];
@@ -1325,7 +1360,7 @@ function FlowEditorModal({ task, onClose, onSave, darkMode }) {
   };
 
   const deleteNode = (id) => {
-    if (id === '1') return; // Não permite deletar Início
+    if (id === '1') return;
     const newNodes = nodes.filter(n => n.id !== id);
     const newConnections = connections.filter(c => c.from !== id && c.to !== id);
     setNodes(newNodes);
@@ -1346,6 +1381,10 @@ function FlowEditorModal({ task, onClose, onSave, darkMode }) {
     setEditingLabel('');
   };
 
+  const updateNodeStatus = (id, status) => {
+    setNodes(nodes.map(n => n.id === id ? { ...n, status } : n));
+  };
+
   const moveNode = (id, direction) => {
     const currentIndex = nodes.findIndex(n => n.id === id);
     if (direction === 'up' && currentIndex > 1) {
@@ -1359,19 +1398,78 @@ function FlowEditorModal({ task, onClose, onSave, darkMode }) {
     }
   };
 
+  const getNodeColor = (status) => {
+    switch(status) {
+      case 'done': return darkMode ? 'border-green-400 bg-green-600/80' : 'border-green-500 bg-green-500/80';
+      case 'doing': return darkMode ? 'border-blue-400 bg-blue-600/80' : 'border-blue-500 bg-blue-500/80';
+      default: return darkMode ? 'border-purple-500 bg-purple-900/60' : 'border-purple-400 bg-purple-400/60';
+    }
+  };
+
+  const saveProject = () => {
+    onSave({ 
+      nodes, 
+      connections, 
+      status: projectStatus,
+      lastActivity: new Date().toISOString()
+    });
+  };
+
   // Calcular posições em linha
   const nodeWidth = 180;
   const nodeHeight = 80;
   const horizontalSpacing = 220;
   const verticalCenter = 150;
 
+  const completedSteps = nodes.filter(n => n.status === 'done').length;
+  const progressPercentage = Math.round((completedSteps / nodes.length) * 100);
+
   return (
     <div className={`fixed inset-0 ${darkMode ? 'bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900' : 'bg-gradient-to-br from-slate-50 via-purple-50 to-slate-50'} flex flex-col z-50`}>
-      {/* Header */}
+      {/* Header - Identidade do Projeto */}
       <div className={`${darkMode ? 'bg-black/30' : 'bg-white/40'} backdrop-blur-lg border-b ${darkMode ? 'border-white/10' : 'border-white/40'} px-6 py-4 flex items-center justify-between flex-shrink-0`}>
-        <h2 className="text-3xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-          📊 Fluxograma: {task.title}
-        </h2>
+        <div className="flex-1">
+          {editingTitle ? (
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={projectTitle}
+                onChange={(e) => setProjectTitle(e.target.value)}
+                onKeyPress={(e) => {
+                  if (e.key === 'Enter') setEditingTitle(false);
+                }}
+                onBlur={() => setEditingTitle(false)}
+                className={`text-3xl font-bold bg-transparent border-b-2 ${darkMode ? 'border-purple-400 text-white' : 'border-purple-600 text-slate-900'} outline-none px-2`}
+                autoFocus
+              />
+            </div>
+          ) : (
+            <h2 
+              onClick={() => setEditingTitle(true)}
+              className="text-3xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent cursor-pointer hover:opacity-80 transition"
+            >
+              📁 {projectTitle}
+            </h2>
+          )}
+          
+          <div className="flex items-center gap-4 mt-2">
+            <select
+              value={projectStatus}
+              onChange={(e) => setProjectStatus(e.target.value)}
+              className={`text-sm ${darkMode ? 'bg-white/10 text-white border-white/20' : 'bg-white text-slate-900 border-slate-300'} border rounded px-3 py-1 font-medium`}
+            >
+              <option value="planejamento">🔵 Planejamento</option>
+              <option value="ativo">🟢 Ativo</option>
+              <option value="pausado">🟡 Pausado</option>
+              <option value="concluido">✅ Concluído</option>
+            </select>
+            
+            <span className={`text-sm ${darkMode ? 'text-white/70' : 'text-slate-700'}`}>
+              {completedSteps}/{nodes.length} etapas • {progressPercentage}%
+            </span>
+          </div>
+        </div>
+        
         <button
           onClick={onClose}
           className={`p-2 rounded-lg transition ${darkMode ? 'hover:bg-white/20' : 'hover:bg-white/40'}`}
@@ -1380,9 +1478,9 @@ function FlowEditorModal({ task, onClose, onSave, darkMode }) {
         </button>
       </div>
 
-      {/* Content Area */}
+      {/* Content Area - Visão Operacional */}
       <div className="flex-1 overflow-hidden flex">
-        {/* Canvas */}
+        {/* Canvas - Linha de Execução */}
         <div className="flex-1 overflow-auto relative p-8">
           {/* SVG para conexões */}
           <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ background: 'transparent' }}>
@@ -1417,148 +1515,243 @@ function FlowEditorModal({ task, onClose, onSave, darkMode }) {
             </defs>
           </svg>
 
-          {/* Nós */}
+          {/* Nós - Etapas do Projeto */}
           <div className="relative" style={{ minHeight: '400px', minWidth: `${nodes.length * horizontalSpacing + 100}px` }}>
-            {nodes.map((node, index) => (
-              <div
-                key={node.id}
-                onClick={() => setSelectedNode(node.id)}
-                className={`absolute rounded-xl transition cursor-pointer flex items-center justify-center border-2 ${
-                  selectedNode === node.id
-                    ? `${darkMode ? 'border-purple-400 bg-purple-600/80' : 'border-purple-500 bg-purple-500/80'} shadow-lg`
-                    : `${darkMode ? 'border-purple-500 bg-purple-900/60 hover:bg-purple-800/80' : 'border-purple-400 bg-purple-400/60 hover:bg-purple-500/70'}`
-                }`}
-                style={{
-                  left: `${32 + index * horizontalSpacing}px`,
-                  top: `${verticalCenter}px`,
-                  width: `${nodeWidth}px`,
-                  height: `${nodeHeight}px`,
-                  zIndex: selectedNode === node.id ? 10 : 1
-                }}
-              >
-                {editingNodeId === node.id ? (
-                  <div className="flex items-center gap-2 w-full px-3">
-                    <input
-                      type="text"
-                      value={editingLabel}
-                      onChange={(e) => setEditingLabel(e.target.value)}
-                      onKeyPress={(e) => e.key === 'Enter' && saveNodeLabel()}
-                      className={`flex-1 px-2 py-1 rounded text-sm font-semibold ${darkMode ? 'bg-white/20 text-white' : 'bg-white/60 text-slate-900'}`}
-                      autoFocus
-                    />
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        saveNodeLabel();
-                      }}
-                      className="text-green-400 hover:text-green-300"
-                    >
-                      ✓
-                    </button>
-                  </div>
-                ) : (
-                  <div
-                    className="text-center text-white font-semibold text-sm px-2 w-full cursor-default hover:underline"
-                    onDoubleClick={() => startEditingNode(node)}
-                  >
-                    {node.label}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Sidebar */}
-        <div className={`${darkMode ? 'bg-white/5 border-l border-white/10' : 'bg-white/30 border-l border-white/40'} w-80 p-6 overflow-y-auto flex flex-col gap-6`}>
-          {/* Controles */}
-          <div>
-            <h3 className="text-lg font-bold mb-4">⚙️ Controles</h3>
-            <button
-              onClick={addNode}
-              className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 rounded-lg transition mb-3"
-            >
-              + Adicionar Etapa
-            </button>
-            {selectedNode && selectedNode !== '1' && (
-              <button
-                onClick={() => deleteNode(selectedNode)}
-                className="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-2 rounded-lg transition"
-              >
-                🗑️ Deletar Etapa
-              </button>
-            )}
-          </div>
-
-          {/* Lista de Nós */}
-          <div>
-            <h3 className="text-lg font-bold mb-4">📋 Etapas ({nodes.length})</h3>
-            <div className={`space-y-2 ${darkMode ? 'bg-white/10' : 'bg-white/40'} rounded-lg p-3`}>
-              {nodes.map((node, index) => (
+            {nodes.map((node, index) => {
+              const nodeClasses = selectedNode === node.id
+                ? `${darkMode ? 'border-yellow-400 bg-yellow-600/80' : 'border-yellow-500 bg-yellow-500/80'} shadow-lg scale-105`
+                : `${getNodeColor(node.status)} hover:scale-105`;
+              
+              return (
                 <div
                   key={node.id}
                   onClick={() => setSelectedNode(node.id)}
-                  className={`p-3 rounded-lg cursor-pointer transition ${
-                    selectedNode === node.id
-                      ? `${darkMode ? 'bg-purple-600 shadow-lg' : 'bg-purple-500 shadow-lg'}`
-                      : `${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/40 hover:bg-white/60'}`
-                  }`}
+                  className={`absolute rounded-xl transition cursor-pointer flex items-center justify-center border-2 ${nodeClasses}`}
+                  style={{
+                    left: `${32 + index * horizontalSpacing}px`,
+                    top: `${verticalCenter}px`,
+                    width: `${nodeWidth}px`,
+                    height: `${nodeHeight}px`,
+                    zIndex: selectedNode === node.id ? 10 : 1
+                  }}
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-semibold text-sm flex-1">{index + 1}. {node.label}</span>
-                    {index > 0 && (
+                  {editingNodeId === node.id ? (
+                    <div className="flex items-center gap-2 w-full px-3">
+                      <input
+                        type="text"
+                        value={editingLabel}
+                        onChange={(e) => setEditingLabel(e.target.value)}
+                        onKeyPress={(e) => e.key === 'Enter' && saveNodeLabel()}
+                        className={`flex-1 px-2 py-1 rounded text-sm font-semibold ${darkMode ? 'bg-white/20 text-white' : 'bg-white/60 text-slate-900'}`}
+                        autoFocus
+                      />
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          moveNode(node.id, 'up');
+                          saveNodeLabel();
                         }}
-                        className="text-xs p-1 hover:bg-white/20 rounded"
-                        title="Mover para cima"
+                        className="text-green-400 hover:text-green-300"
                       >
-                        ↑
+                        ✓
                       </button>
-                    )}
-                    {index < nodes.length - 1 && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          moveNode(node.id, 'down');
-                        }}
-                        className="text-xs p-1 hover:bg-white/20 rounded"
-                        title="Mover para baixo"
+                    </div>
+                  ) : (
+                    <div className="text-center px-2 w-full">
+                      <div
+                        className="text-white font-semibold text-sm cursor-default hover:underline"
+                        onDoubleClick={() => startEditingNode(node)}
                       >
-                        ↓
-                      </button>
-                    )}
-                  </div>
+                        {node.label}
+                      </div>
+                      <div className="text-xs text-white/70 mt-1">
+                        {node.status === 'done' && '✅ Concluída'}
+                        {node.status === 'doing' && '⚡ Em progresso'}
+                        {node.status === 'todo' && '📋 Planejada'}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              ))}
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Sidebar - Ações do Projeto */}
+        <div className={`${darkMode ? 'bg-white/5 border-l border-white/10' : 'bg-white/30 border-l border-white/40'} w-80 p-6 overflow-y-auto flex flex-col gap-6`}>
+          <div>
+            <h3 className="text-lg font-bold mb-4">⚙️ Ações do Projeto</h3>
+            <div className="space-y-2">
+              <button
+                onClick={addNode}
+                className="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 rounded-lg transition flex items-center justify-center gap-2"
+              >
+                <Plus className="w-5 h-5" />
+                Nova Etapa
+              </button>
+              
+              <button
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-lg transition flex items-center justify-center gap-2"
+              >
+                🤖 Sugerir Próximo Passo
+              </button>
+              
+              <button
+                className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 rounded-lg transition flex items-center justify-center gap-2"
+              >
+                📎 Anexar Arquivo
+              </button>
+              
+              <button
+                className="w-full bg-pink-600 hover:bg-pink-700 text-white font-semibold py-2 rounded-lg transition flex items-center justify-center gap-2"
+              >
+                🏷️ Gerenciar Tags
+              </button>
             </div>
           </div>
 
-          {/* Instruções */}
+          {selectedNode && currentNode && (
+            <div className={`rounded-lg p-4 ${darkMode ? 'bg-white/10 border border-white/20' : 'bg-white/40 border border-white/40'}`}>
+              <h4 className="font-bold mb-3 flex items-center gap-2">
+                🧩 Etapa Selecionada
+              </h4>
+              <p className="font-semibold mb-3">{currentNode.label}</p>
+              
+              <div className="space-y-2 mb-4">
+                <label className="text-xs font-medium block">Status da Etapa</label>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => updateNodeStatus(selectedNode, 'todo')}
+                    className={`flex-1 py-2 rounded text-xs font-bold transition ${currentNode.status === 'todo' ? 'bg-purple-600 text-white' : (darkMode ? 'bg-white/10 text-white/70' : 'bg-white/30 text-slate-700')}`}
+                  >
+                    📋 Pendente
+                  </button>
+                  <button
+                    onClick={() => updateNodeStatus(selectedNode, 'doing')}
+                    className={`flex-1 py-2 rounded text-xs font-bold transition ${currentNode.status === 'doing' ? 'bg-blue-600 text-white' : (darkMode ? 'bg-white/10 text-white/70' : 'bg-white/30 text-slate-700')}`}
+                  >
+                    ⚡ Fazendo
+                  </button>
+                  <button
+                    onClick={() => updateNodeStatus(selectedNode, 'done')}
+                    className={`flex-1 py-2 rounded text-xs font-bold transition ${currentNode.status === 'done' ? 'bg-green-600 text-white' : (darkMode ? 'bg-white/10 text-white/70' : 'bg-white/30 text-slate-700')}`}
+                  >
+                    ✅ Pronto
+                  </button>
+                </div>
+              </div>
+
+              <button className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-2 font-semibold transition flex items-center justify-center gap-2">
+                <Plus className="w-4 h-4" />
+                Criar Tarefa Vinculada
+              </button>
+
+              {selectedNode !== '1' && (
+                <button
+                  onClick={() => deleteNode(selectedNode)}
+                  className="w-full mt-2 bg-red-600 hover:bg-red-700 text-white font-semibold py-2 rounded-lg transition"
+                >
+                  🗑️ Deletar Etapa
+                </button>
+              )}
+            </div>
+          )}
+
+          <div>
+            <h3 className="text-lg font-bold mb-4">📋 Etapas do Projeto ({nodes.length})</h3>
+            <div className={`space-y-2 ${darkMode ? 'bg-white/10' : 'bg-white/40'} rounded-lg p-3 max-h-96 overflow-y-auto`}>
+              {nodes.map((node, index) => {
+                const isSelected = selectedNode === node.id;
+                const itemClasses = isSelected
+                  ? `${darkMode ? 'bg-yellow-600/80 shadow-lg' : 'bg-yellow-500/80 shadow-lg'}`
+                  : `${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/40 hover:bg-white/60'}`;
+                
+                return (
+                  <div
+                    key={node.id}
+                    onClick={() => setSelectedNode(node.id)}
+                    className={`p-3 rounded-lg cursor-pointer transition ${itemClasses}`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex-1">
+                        <span className="font-semibold text-sm">{index + 1}. {node.label}</span>
+                        <div className="text-xs mt-1 opacity-70">
+                          {node.status === 'done' && '✅ Concluída'}
+                          {node.status === 'doing' && '⚡ Em progresso'}
+                          {node.status === 'todo' && '📋 Planejada'}
+                        </div>
+                      </div>
+                      <div className="flex gap-1">
+                        {index > 0 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              moveNode(node.id, 'up');
+                            }}
+                            className="text-xs p-1 hover:bg-white/20 rounded"
+                            title="Mover para cima"
+                          >
+                            ↑
+                          </button>
+                        )}
+                        {index < nodes.length - 1 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              moveNode(node.id, 'down');
+                            }}
+                            className="text-xs p-1 hover:bg-white/20 rounded"
+                            title="Mover para baixo"
+                          >
+                            ↓
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className={`${darkMode ? 'bg-white/10' : 'bg-white/40'} rounded-lg p-4`}>
+            <h4 className="font-bold mb-2">📊 Progresso Geral</h4>
+            <div className={`${darkMode ? 'bg-white/5' : 'bg-white/30'} rounded-full h-4 overflow-hidden mb-2`}>
+              <div
+                className="bg-gradient-to-r from-green-500 to-emerald-500 h-full transition-all duration-500"
+                style={{ width: `${progressPercentage}%` }}
+              />
+            </div>
+            <div className="text-center font-bold text-lg">{progressPercentage}%</div>
+          </div>
+
           <div className={`text-xs ${darkMode ? 'text-white/60' : 'text-slate-700'} space-y-2`}>
             <p><strong>💡 Dicas:</strong></p>
             <p>• Clique duplo no bloco para editar o nome</p>
             <p>• Use os botões ↑↓ para reordenar etapas</p>
-            <p>• Adicione novas etapas sequencialmente</p>
+            <p>• Clique na etapa para ver opções</p>
+            <p>• Altere o status para acompanhar progresso</p>
           </div>
         </div>
       </div>
 
-      {/* Footer */}
+      {/* Footer com botões de ação */}
       <div className={`${darkMode ? 'bg-black/30 border-t border-white/10' : 'bg-white/40 border-t border-white/40'} backdrop-blur-lg px-6 py-4 flex gap-4 flex-shrink-0`}>
         <button
-          onClick={() => onSave({ nodes, connections })}
-          className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold py-3 rounded-lg transition shadow-lg"
+          onClick={saveProject}
+          className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold py-3 rounded-lg transition shadow-lg flex items-center justify-center gap-2"
         >
-          💾 Salvar Fluxograma
+          💾 Salvar Projeto
+        </button>
+        <button
+          className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold py-3 rounded-lg transition shadow-lg flex items-center justify-center gap-2"
+        >
+          📂 Abrir Projeto Completo
         </button>
         <button
           onClick={onClose}
-          className={`flex-1 ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/40 hover:bg-white/60'} text-white font-bold py-3 rounded-lg transition`}
+          className={`px-6 ${darkMode ? 'bg-white/10 hover:bg-white/20' : 'bg-white/40 hover:bg-white/60'} font-bold py-3 rounded-lg transition flex items-center justify-center gap-2`}
         >
-          ✕ Cancelar
+          ✕ Fechar
         </button>
       </div>
     </div>
